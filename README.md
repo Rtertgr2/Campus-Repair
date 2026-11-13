@@ -1,32 +1,37 @@
-# React + TypeScript + Vite
+# Campus Repair — ระบบแจ้งซ่อมสถานที่
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+เว็บแจ้งซ่อมสถานที่/ของส่วนรวมที่ชำรุด (Vite + React + TypeScript + Bootstrap)
 
-Currently, two official plugins are available:
+## เริ่มใช้งาน
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
-
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```bash
+npm install
+npm run dev      # http://localhost:5173
+npm run build
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+ถ้าไม่ตั้งค่า `VITE_API_URL` แอปจะใช้ข้อมูลตัวอย่างในหน่วยความจำ (ดู `.env.example`)
+
+## หน้าและไฟล์
+
+| หน้า | URL | ไฟล์ |
+| --- | --- | --- |
+| หน้าแรก (ภาพรวมงานซ่อม + อาคารที่ให้บริการ) | `/` | `src/pages/home/Home.tsx` |
+| แจ้งซ่อม (ฟอร์ม + แนบรูป) | `/audit` | `src/pages/audit-page/AuditPage.tsx` |
+| ติดตามงานซ่อม (รายการ + ปิด/เปิดงาน) | `/tracker` | `src/pages/tracker-page/TrackerPage.tsx` |
+
+เส้นทางอื่นทั้งหมดถูก redirect กลับ `/` (กำหนดใน `src/App.tsx`)
+
+## ไฟล์ที่ใช้ร่วมกัน
+
+- `src/App.tsx` — route และโครงหน้า
+- `src/components/header/Header.tsx` — แบรนด์ เมนู และโหมดเจ้าหน้าที่
+- `src/index.css` — ธีม สี ฟอนต์ และคอมโพเนนต์
+- `src/lib/api.ts` — เรียก Apps Script backend หรือใช้ mock
+- `src/lib/image.ts` — ย่อรูปก่อนอัปโหลด
+- `src/lib/staff-context.tsx` — สถานะเจ้าหน้าที่/PIN
+
+## ฐานข้อมูล (เตรียมไว้ ยังไม่ใช้งาน)
+
+โค้ดฝั่ง server อยู่ใน `db/` (Neon Postgres) ยังไม่ถูกเรียกจากแอป:
+ตั้ง `DATABASE_URL` แล้วรัน `npm run db:init` เมื่อพร้อมใช้งาน

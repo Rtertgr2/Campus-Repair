@@ -1,0 +1,378 @@
+/**
+ * Client for the Campus Repair Google Apps Script backend.
+ *
+ * Every call is a POST of a JSON body with an `action`, sent as
+ * `text/plain` so the browser does not issue a CORS preflight (Apps Script
+ * web apps cannot answer one).
+ *
+ * When VITE_API_URL is not set the module falls back to an in-memory store so
+ * the app stays usable locally; `isBackendConfigured` is exported so the UI can
+ * say so instead of pretending data was saved.
+ */
+
+export const API_URL = String(import.meta.env.VITE_API_URL ?? "").trim()
+export const isBackendConfigured = API_URL.length > 0
+
+export const STATUS_PENDING = "รอแก้ไข"
+export const STATUS_CLOSED = "ปิดงานแล้ว"
+
+export interface Issue {
+  rowIndex: number
+  id: string
+  createdDate: string
+  dueDate: string
+  groupId: string
+  zone: string
+  category: string
+  riskLevel: string
+  locationDetail: string
+  suggestion: string
+  beforePhoto: string
+  status: string
+  closedDate: string
+  afterPhoto: string
+  staffNote: string
+}
+
+export interface NewIssueInput {
+  groupId: string
+  zone: string
+  category: string
+  riskLevel: string
+  locationDetail: string
+  suggestion: string
+  beforePhotoDataUrl?: string
+}
+
+export interface StatusUpdateInput {
+  pin: string
+  rowIndex: number
+  status: string
+  staffNote?: string
+  afterPhotoDataUrl?: string
+  afterPhotoName?: string
+}
+
+export interface Assessment {
+  id: string
+  timestamp: string
+  studentId: string
+  studentName: string
+  level: string
+  groupId: string
+  knowledgeCorrect: number
+  knowledgeTotal: number
+  knowledgePercent: number
+  awarenessPoints: number
+  awarenessMax: number
+  awarenessPercent: number
+}
+
+export interface NewAssessmentInput {
+  studentId: string
+  studentName: string
+  level: string
+  groupId: string
+  knowledgeCorrect: number
+  knowledgeTotal: number
+  awarenessPoints: number
+  awarenessMax: number
+}
+
+/** Shape returned by the Apps Script sheet rows (see apps-script/Code.gs). */
+interface RawIssue {
+  rowIndex: number
+  id: string
+  createdDate: string
+  dueDate: string
+  groupId: string
+  zone: string
+  category: string
+  riskLevel: string
+  locationDetail: string
+  suggestion: string
+  beforePhotoUrl: string
+  status: string
+  closedDate: string
+  afterPhotoUrl: string
+  staffNote: string
+}
+
+interface ApiResponse {
+  ok: boolean
+  error?: string
+  issues?: RawIssue[]
+  issue?: RawIssue
+  assessments?: Assessment[]
+  assessment?: Assessment
+}
+
+function toIssue(raw: RawIssue): Issue {
+  return {
+    rowIndex: Number(raw.rowIndex),
+    id: raw.id ?? "",
+    createdDate: raw.createdDate ?? "",
+    dueDate: raw.dueDate ?? "",
+    groupId: raw.groupId ?? "",
+    zone: raw.zone ?? "",
+    category: raw.category ?? "",
+    riskLevel: raw.riskLevel ?? "",
+    locationDetail: raw.locationDetail ?? "",
+    suggestion: raw.suggestion ?? "",
+    beforePhoto: raw.beforePhotoUrl ?? "",
+    status: raw.status || STATUS_PENDING,
+    closedDate: raw.closedDate ?? "",
+    afterPhoto: raw.afterPhotoUrl ?? "",
+    staffNote: raw.staffNote ?? "",
+  }
+}
+
+async function post(payload: Record<string, unknown>): Promise<ApiResponse> {
+  if (!isBackendConfigured) return mockHandle(payload)
+
+  let response: Response
+  try {
+    response = await fetch(API_URL, {
+      method: "POST",
+      redirect: "follow",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify(payload),
+    })
+  } catch (err) {
+    throw new Error(
+      "เชื่อมต่อ backend ไม่ได้: " +
+        (err instanceof Error ? err.message : String(err)),
+    )
+  }
+
+  if (!response.ok) {
+    throw new Error(`backend ตอบกลับผิดพลาด (HTTP ${response.status})`)
+  }
+
+  let data: ApiResponse
+  try {
+    data = (await response.json()) as ApiResponse
+  } catch {
+    throw new Error("backend ส่งข้อมูลที่ไม่ใช่ JSON กลับมา (ตรวจสอบ URL /exec)")
+  }
+
+  if (!data.ok) throw new Error(data.error || "คำขอถูกปฏิเสธจาก backend")
+  return data
+}
+
+export const api = {
+  async listIssues(): Promise<Issue[]> {
+    const data = await post({ action: "listIssues" })
+    return (data.issues ?? []).map(toIssue)
+  },
+
+  async createIssue(input: NewIssueInput): Promise<Issue> {
+    if (!input.groupId || !input.zone) throw new Error("กรุณาเลือกอาคาร/พื้นที่")
+    const data = await post({ action: "createIssue", issue: input })
+    if (!data.issue) throw new Error("backend ไม่ได้ส่งข้อมูลรายการที่บันทึกกลับมา")
+    return toIssue(data.issue)
+  },
+
+  async updateStatus(input: StatusUpdateInput): Promise<Issue> {
+    if (!input.pin) throw new Error("ต้องยืนยันรหัส PIN เจ้าหน้าที่ก่อน")
+    const data = await post({ action: "updateStatus", ...input })
+    if (!data.issue) throw new Error("backend ไม่ได้ส่งข้อมูลรายการที่อัปเดตกลับมา")
+    return toIssue(data.issue)
+  },
+
+  async verifyPin(pin: string): Promise<boolean> {
+    try {
+      await post({ action: "verifyPin", pin })
+      return true
+    } catch {
+      return false
+    }
+  },
+
+  async listAssessments(): Promise<Assessment[]> {
+    const data = await post({ action: "listAssessments" })
+    return data.assessments ?? []
+  },
+
+  async submitAssessment(input: NewAssessmentInput): Promise<Assessment> {
+    if (!input.studentId || !input.studentName || !input.groupId) {
+      throw new Error("กรุณากรอกข้อมูลให้ครบถ้วน")
+    }
+    const data = await post({ action: "submitAssessment", assessment: input })
+    if (!data.assessment) throw new Error("backend ไม่ได้ส่งผลการประเมินกลับมา")
+    return data.assessment
+  },
+}
+
+/* --------------------------------------------------------------------------
+ * Local fallback store — used only when VITE_API_URL is empty.
+ * Nothing here persists across a page reload and nothing is written to Sheets.
+ * ------------------------------------------------------------------------ */
+
+const STAFF_PIN_FALLBACK = "1234"
+
+function today(): string {
+  return new Date().toLocaleDateString("th-TH", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  })
+}
+
+let mockIssues: Issue[] = [
+  {
+    rowIndex: 2,
+    id: "GW-001",
+    createdDate: "10/01/2026",
+    dueDate: "09/02/2026",
+    groupId: "G01",
+    zone: "อาคารเรียน 1",
+    category: "ไฟฟ้า / หลอดไฟ",
+    riskLevel: "สูง",
+    locationDetail: "หลอดไฟทางเข้าอาคารหลักดับ",
+    suggestion: "เปลี่ยนหลอดไฟและตรวจสอบสายไฟ",
+    beforePhoto: "",
+    status: STATUS_PENDING,
+    closedDate: "",
+    afterPhoto: "",
+    staffNote: "",
+  },
+  {
+    rowIndex: 3,
+    id: "GW-002",
+    createdDate: "15/01/2026",
+    dueDate: "14/02/2026",
+    groupId: "G02",
+    zone: "อาคารเรียน 2",
+    category: "ประปา / สุขภัณฑ์",
+    riskLevel: "ปานกลาง",
+    locationDetail: "ก๊อกน้ำห้องน้ำชั้น 1 รั่ว",
+    suggestion: "เปลี่ยนก๊อกน้ำและตรวจสอบท่อ",
+    beforePhoto: "",
+    status: STATUS_CLOSED,
+    closedDate: "20/01/2026",
+    afterPhoto: "",
+    staffNote: "ซ่อมเสร็จโดยทีมงานอาคารสถานที่",
+  },
+  {
+    rowIndex: 4,
+    id: "GW-003",
+    createdDate: "20/01/2026",
+    dueDate: "19/02/2026",
+    groupId: "G03",
+    zone: "โรงอาหาร",
+    category: "ครุภัณฑ์ / เฟอร์นิเจอร์",
+    riskLevel: "ต่ำ",
+    locationDetail: "โต๊ะอาหารชำรุด 2 ตัว",
+    suggestion: "ซ่อมหรือเปลี่ยนโต๊ะที่ชำรุด",
+    beforePhoto: "",
+    status: STATUS_PENDING,
+    closedDate: "",
+    afterPhoto: "",
+    staffNote: "",
+  },
+]
+
+let mockAssessments: Assessment[] = []
+
+function nextMockId(): string {
+  const max = mockIssues.reduce((acc, issue) => {
+    const match = /^GW-(\d+)$/.exec(issue.id)
+    return match ? Math.max(acc, Number(match[1])) : acc
+  }, 0)
+  return `GW-${String(max + 1).padStart(3, "0")}`
+}
+
+function mockHandle(payload: Record<string, unknown>): ApiResponse {
+  const action = payload.action
+
+  if (action === "listIssues") {
+    return { ok: true, issues: mockIssues as unknown as RawIssue[] }
+  }
+
+  if (action === "verifyPin") {
+    return payload.pin === STAFF_PIN_FALLBACK
+      ? { ok: true }
+      : { ok: false, error: "รหัส PIN ไม่ถูกต้อง" }
+  }
+
+  if (action === "createIssue") {
+    const input = (payload.issue ?? {}) as NewIssueInput
+    if (!input.groupId || !input.zone) {
+      return { ok: false, error: "กรุณาเลือกอาคาร/พื้นที่" }
+    }
+    const issue: Issue = {
+      rowIndex: mockIssues.length + 2,
+      id: nextMockId(),
+      createdDate: today(),
+      dueDate: today(),
+      groupId: input.groupId,
+      zone: input.zone,
+      category: input.category,
+      riskLevel: input.riskLevel,
+      locationDetail: input.locationDetail,
+      suggestion: input.suggestion,
+      beforePhoto: input.beforePhotoDataUrl ? "mock://photo" : "",
+      status: STATUS_PENDING,
+      closedDate: "",
+      afterPhoto: "",
+      staffNote: "",
+    }
+    mockIssues = [...mockIssues, issue]
+    return { ok: true, issue: issue as unknown as RawIssue }
+  }
+
+  if (action === "updateStatus") {
+    const update = payload as unknown as StatusUpdateInput
+    if (update.pin !== STAFF_PIN_FALLBACK) {
+      return { ok: false, error: "รหัส PIN ไม่ถูกต้อง" }
+    }
+    const index = mockIssues.findIndex((issue) => issue.rowIndex === Number(update.rowIndex))
+    if (index < 0) return { ok: false, error: "ไม่พบรายการที่ต้องการอัปเดต" }
+
+    const closing = update.status === STATUS_CLOSED
+    const updated: Issue = {
+      ...mockIssues[index],
+      status: closing ? STATUS_CLOSED : STATUS_PENDING,
+      closedDate: closing ? today() : "",
+      staffNote: update.staffNote ?? mockIssues[index].staffNote,
+      afterPhoto: update.afterPhotoDataUrl ? "mock://after-photo" : mockIssues[index].afterPhoto,
+    }
+    mockIssues = mockIssues.map((issue, i) => (i === index ? updated : issue))
+    return { ok: true, issue: updated as unknown as RawIssue }
+  }
+
+  if (action === "listAssessments") {
+    return { ok: true, assessments: mockAssessments }
+  }
+
+  if (action === "submitAssessment") {
+    const input = (payload.assessment ?? {}) as NewAssessmentInput
+    if (!input.studentId || !input.studentName || !input.groupId) {
+      return { ok: false, error: "กรุณากรอกข้อมูลให้ครบถ้วน" }
+    }
+    const knowledgeTotal = Math.max(1, Number(input.knowledgeTotal) || 10)
+    const awarenessMax = Math.max(1, Number(input.awarenessMax) || 12)
+    const knowledgeCorrect = Math.min(Math.max(Number(input.knowledgeCorrect) || 0, 0), knowledgeTotal)
+    const awarenessPoints = Math.min(Math.max(Number(input.awarenessPoints) || 0, 0), awarenessMax)
+
+    const assessment: Assessment = {
+      id: `A-${String(mockAssessments.length + 1).padStart(3, "0")}`,
+      timestamp: new Date().toISOString(),
+      studentId: input.studentId,
+      studentName: input.studentName,
+      level: input.level ?? "",
+      groupId: input.groupId,
+      knowledgeCorrect,
+      knowledgeTotal,
+      knowledgePercent: Math.round((knowledgeCorrect / knowledgeTotal) * 100),
+      awarenessPoints,
+      awarenessMax,
+      awarenessPercent: Math.round((awarenessPoints / awarenessMax) * 100),
+    }
+    mockAssessments = [...mockAssessments, assessment]
+    return { ok: true, assessment }
+  }
+
+  return { ok: false, error: `ไม่รู้จักคำสั่ง: ${String(action)}` }
+}

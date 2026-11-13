@@ -1,54 +1,34 @@
-import React, { useState, useEffect } from "react"
-import { BrowserRouter as Router, Routes, Route, Link, useNavigate } from "react-router-dom"
-import { Container, Row, Col } from "react-bootstrap"
+import React from "react"
+import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom"
 
 // Components
-import Home from "./pages/home"
-import AuditPage from "./pages/audit-page"
-import TrackerPage from "./pages/tracker-page"
-import AssessmentPage from "./pages/assessment-page"
-import Header from "./components/header"
-import KPI from "./components/kpi"
-import ZoneMap from "./components/zone-map"
+import Home from "./pages/home/Home"
+import AuditPage from "./pages/audit-page/AuditPage"
+import TrackerPage from "./pages/tracker-page/TrackerPage"
+import Header from "./components/header/Header"
+import { StaffProvider } from "./lib/staff-context"
 
-// Styles
-import "./styles/global.css"
-import "bootstrap/dist/bootstrap.min.css"
 
-const App: React.FC = () => {
-  const [isStaff, setIsStaff] = useState(false)
-  const navigate = useNavigate()
-
-  // Check staff PIN on load
-  useEffect(() => {
-    // In a real app, this would check localStorage or a cookie
-    // For now, we'll simulate staff mode
-    const checkPin = () => {
-      const pin = prompt("กรอกรหัส PIN เจ้าหน้าที่ (หรือเว้นว่างเพื่อใช้เป็นผู้ใช้ทั่วไป):", "")
-      if (pin && pin.length === 4 && /^\d+$/.test(pin)) {
-        // Verify against config - in real app this would check with server
-        if (pin === "1234") {
-          setIsStaff(true)
-        }
-      }
-    }
-    checkPin()
-  }, [])
-
-  return (
-    <Router>
-      <Container fluid>
-        <Header isStaff={isStaff} setIsStaff={setIsStaff} />
-        <hr />
+const App: React.FC = () => (
+  <Router>
+    <StaffProvider>
+      <Header />
+      <main>
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="audit" element={<AuditPage />} />
           <Route path="tracker" element={<TrackerPage />} />
-          <Route path="assessment" element={<AssessmentPage />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
-      </Container>
-    </Router>
-  )
-}
+      </main>
+      <footer className="site-foot wrap">
+        <p>Campus Repair • ระบบแจ้งซ่อมสถานที่และของส่วนรวมที่ชำรุด</p>
+        <p>
+          แจ้งซ่อมได้ทุกอาคารภายในสถานศึกษา และติดตามสถานะงานซ่อมได้ตลอด 30 วัน
+        </p>
+      </footer>
+    </StaffProvider>
+  </Router>
+)
 
 export default App
