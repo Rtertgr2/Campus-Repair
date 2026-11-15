@@ -103,6 +103,64 @@ php db/migrate-photos.php --uploads=... --drop-blobs   # ลบคอลัม�
 อย่าชี้ไปที่ `dist/uploads` เพราะ `npm run build` ล้าง `dist` ทั้งโฟลเดอร์
 สคริปต์รันซ้ำได้ (ข้ามแถวที่ย้ายแล้ว) และเพิ่มคอลัมน์ path ให้เองถ้ายังไม่มี
 
+## ตรวจความพร้อมและเก็บกวาดไฟล์
+
+สองสคริปต์นี้รันจาก **โฟลเดอร์โปรเจกต์** (ไม่ใช่จาก `dist/` เพราะ `dist` ไม่มี `db/`)
+และอ่านค่าเชื่อมต่อจาก `public/api/config.php` — ตั้ง `DB_HOST`, `DB_NAME`, `DB_USER`,
+`DB_PASSWORD`, `STAFF_PIN` (หรือใช้ `public/api/config.local.php`) ให้ชี้ไปที่เว็บจริง
+ก่อนรัน ถ้า uploads อยู่ที่อื่นให้ส่ง `--uploads=<absolute path>`; เรียกผ่านเบราว์เซอร์ไม่ได้ (ตอบ 404)
+
+### `db/deploy-check.php` — ตรวจก่อน/หลัง deploy
+
+```bash
+php db/deploy-check.php
+php db/deploy-check.php --uploads=/opt/lampp/htdocs/campus-repair/uploads
+npm run deploy:check     # ทางลัด (ต้องมี PHP ในเครื่องที่รัน)
+```
+
+ตรวจ: PHP ≥ 8.0, `pdo_mysql`, `gd`, `mbstring`, ค่าคอนเนกชัน, `config.local.php`,
+`STAFF_PIN`, การต่อ MySQL, ตาราง `repair_jobs` + คอลัมน์ `before_photo_path`/
+`after_photo_path`, คอลัมน์ base64 เดิมเป็น NULL ได้, ตาราง `assessments`,
+เขียนไฟล์ใน uploads ได้, uploads อยู่ใต้รากเว็บ, โฟลเดอร์ตัวนับ rate limit เขียนได้,
+พื้นที่ดิสก์เหลือ ≥ 512 MB
+
+- ตัวเลือก: `--uploads=<dir>` เท่านั้น นอกนั้นอ่านจาก config
+- ผลลัพธ์: บรรทัดละ `PASS` / `WARN` / `FAIL` พร้อมวิธีแก้ และสรุปท้าย `ผ่าน X, เตือน Y, ต้องแก้ Z`
+- **exit 0** = ไม่มี FAIL (WARN ไม่ทำให้ล้ม เช่น ไม่มี GD ก็ยังใช้รูปเต็มแทน thumbnail ได้)
+- **exit 1** = มีอย่างน้อยหนึ่ง FAIL ต้องแก้ก่อนเปิดใช้
+
+### `db/prune-uploads.php` — ลบไฟล์รูปที่ไม่มีเจ้าของ
+
+```bash
+php db/prune-uploads.php --dry-run
+php db/prune-uploads.php --uploads=/opt/lampp/htdocs/campus-repair/uploads
+php db/prune-uploads.php --min-age=600 --limit=100
+```
+
+ไฟล์กำพร้า = ไม่มี path ไหนใน `repair_jobs` ชี้มา (thumbnail ของรูปที่ถูกอ้างถึงนับว่ามีเจ้าของ)
+ข้าม dotfile อย่าง `.htaccess` และข้ามไฟล์ที่เพิ่งเขียนภายใน `--min-age` เพราะอาจเป็นคำขอที่ยังทำงานอยู่
+
+| ตัวเลือก | ความหมาย |
+|---|---|
+| `--dry-run` | พิมพ์รายการที่จะลบ (สูงสุด 20 บรรทัดแรก) ไม่ลบจริง — ควรใช้ก่อนทุกครั้ง |
+| `--uploads=<dir>` | โฟลเดอร์ปลายทาง (ค่าเริ่มต้น `UPLOADS_DIR` หรือ `public/uploads`) |
+| `--min-age=<วินาที>` | ข้ามไฟล์ที่ใหม่กว่านี้ (ค่าเริ่มต้น 3600, `0` = ไม่ข้าม) |
+| `--limit=<n>` | ลบไม่เกิน n ไฟล์ต่อรอบ |
+
+- **exit 0** = ทำงานจบ (ไม่พบไฟล์ หรือลบสำเร็จทั้งหมด)
+- **exit 1** = หาโฟลเดอร์ไม่เจอ / อ่านฐานข้อมูลไม่ได้ / มีไฟล์ที่ลบไม่สำเร็จ (พิมพ์ path ทาง stderr)
+
+ตั้งรันเป็นรอบ (cron) บนเครื่องที่มองเห็นทั้งฐานข้อมูลและโฟลเดอร์ uploads:
+
+```bash
+# ตรวจความพร้อมทุกวัน 03:10 และเก็บกวาดไฟล์กำพร้าทุกสัปดาห์ (อาทิตย์ 03:40)
+10 3 * * *  cd /home/deploy/campus-repair && php db/deploy-check.php --uploads=/opt/lampp/htdocs/campus-repair/uploads >> /var/log/campus-api.log 2>&1
+40 3 * * 0  cd /home/deploy/campus-repair && php db/prune-uploads.php --uploads=/opt/lampp/htdocs/campus-repair/uploads --min-age=86400 >> /var/log/campus-prune.log 2>&1
+```
+
+cron ไม่ได้รับ `DB_*`/`STAFF_PIN` จาก shell โดยอัตโนมัติ — ถ้าไม่ได้ export ไว้ ใน crontab
+ให้ใช้ `public/api/config.local.php` แทน และรัน `--dry-run` ด้วยมือหนึ่งครั้งก่อนเปิด cron
+
 ## ความปลอดภัยของฟอร์มสาธารณะ
 
 - **Rate limit ต่อ IP**: `createIssue` และ `submitAssessment` จำกัด 10 ครั้ง/นาที
