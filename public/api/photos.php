@@ -11,6 +11,8 @@ declare(strict_types=1);
  */
 
 const PHOTO_MAX_BYTES = 3 * 1024 * 1024; // longest accepted data-URL string
+const PHOTO_MAX_DIMENSION = 1600;       // long side of the stored photo
+const PHOTO_QUALITY = 82;               // JPEG/WebP quality of the stored photo
 const PHOTO_THUMB_WIDTH = 480;
 const PHOTO_THUMB_QUALITY = 72;
 
@@ -53,6 +55,49 @@ function ensureDir(string $dir): void
     }
 }
 
+/** Decoded size of a data-URL photo, without decoding it (base64 carries 3 bytes per 4 chars). */
+function photoBytes(string $dataUrl): int
+{
+    $comma = strrpos($dataUrl, ',');
+    return $comma === false ? 0 : (int) ((strlen($dataUrl) - $comma - 1) * 3 / 4);
+}
+
+/**
+ * Re-encodes a validated image so EXIF/GPS and any other metadata are dropped and
+ * the long side is capped. Returns the original bytes when GD is unavailable or
+ * cannot process the image, so hosts without GD keep the old behaviour.
+ */
+function reencodePhoto(string $bytes, string $type): string
+{
+    if (!function_exists('imagecreatefromstring')) return $bytes;
+    $image = @imagecreatefromstring($bytes);
+    if ($image === false) return $bytes;
+
+    $width = imagesx($image);
+    $height = imagesy($image);
+    $scale = min(1.0, PHOTO_MAX_DIMENSION / max(1, $width, $height));
+    if ($scale < 1.0) {
+        $scaled = imagescale($image, max(1, (int) round($width * $scale)), max(1, (int) round($height * $scale)));
+        if ($scaled !== false) {
+            imagedestroy($image);
+            $image = $scaled;
+        }
+    }
+
+    imagealphablending($image, false);
+    imagesavealpha($image, true);
+    ob_start();
+    $ok = match ($type) {
+        'png' => imagepng($image, null, 6),
+        'webp' => imagewebp($image, null, PHOTO_QUALITY),
+        default => imagejpeg($image, null, PHOTO_QUALITY),
+    };
+    $encoded = (string) ob_get_clean();
+    imagedestroy($image);
+
+    return $ok && $encoded !== '' ? $encoded : $bytes;
+}
+
 /**
  * Decodes a data-URL photo, writes it plus a thumbnail and returns the stored path.
  * Throws InvalidArgumentException for bad input and RuntimeException for IO problems.
@@ -69,6 +114,8 @@ function storePhoto(string $dataUrl, string $subDir = ''): string
     if (!$info || $info['mime'] !== 'image/' . $parts[1]) {
         throw new InvalidArgumentException('ไฟล์รูปภาพไม่ถูกต้อง');
     }
+
+    $bytes = reencodePhoto($bytes, $parts[1]);
 
     $subDir = $subDir !== '' ? trim($subDir, '/') : date('Y/m');
     $name = bin2hex(random_bytes(16)) . '.' . PHOTO_EXTENSIONS[$parts[1]];

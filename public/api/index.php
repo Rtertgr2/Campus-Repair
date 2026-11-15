@@ -24,6 +24,7 @@ $GLOBALS['createdPhotos'] = [];
 const CAP_TEXT = 2000; // free text: locationDetail, suggestion, staffNote
 const CAP_NAME = 191;  // labels and names: zone, category, riskLevel, studentName
 const CAP_CODE = 64;   // codes and ids: groupId, studentId, level
+const MAX_REQUEST_BYTES = 7 * 1024 * 1024; // larger bodies are refused outright
 const PHOTO_SCHEMA_HINT = ' — ต้องรัน `php db/migrate-photos.php --uploads=<โฟลเดอร์ uploads ของเว็บ>`'
     . ' ให้จบก่อน แล้วลองใหม่ (README หัวข้อ "รูปภาพ (uploads)")';
 
@@ -70,10 +71,19 @@ function cr_reject_honeypot(array $input): void {
         if (is_string($value) && trim($value) !== '') fail('ไม่สามารถดำเนินการได้', 400);
     }
 }
-/** Validates a photo data URL, stores it as a file and returns its relative path. */
-function photoField(array $input, string $key): string {
+/**
+ * Validates a photo data URL, charges $dailyBytes of the caller's budget (0 = no
+ * budget, used by staff actions) and stores it as a file; returns its path.
+ */
+function photoField(array $input, string $key, string $ip = '', int $dailyBytes = 0): string {
     try {
-        $path = storePhoto(field($input, $key, PHOTO_MAX_BYTES));
+        // Read up to the request cap so storePhoto() can explain the photo limit itself.
+        $dataUrl = field($input, $key, MAX_REQUEST_BYTES);
+        if ($dataUrl !== '' && !uploadQuotaReserve($ip, photoBytes($dataUrl), $dailyBytes)) {
+            header('Retry-After: ' . secondsUntilTomorrow());
+            fail('อัปโหลดรูปครบโควตาวันนี้แล้ว กรุณาแจ้งซ่อมโดยไม่แนบรูป หรือลองใหม่พรุ่งนี้', 429);
+        }
+        $path = storePhoto($dataUrl);
         if ($path !== '') $GLOBALS['createdPhotos'][] = $path;
         return $path;
     } catch (InvalidArgumentException $e) {
@@ -84,17 +94,22 @@ function photoField(array $input, string $key): string {
     }
     return '';
 }
+/** Column rows of $table, or a 503 saying db/schema.sql has not been imported. */
+function tableColumns(PDO $db, string $table): array {
+    try {
+        return $db->query('SHOW COLUMNS FROM ' . $table)->fetchAll();
+    } catch (PDOException $e) {
+        if ($e->getCode() !== '42S02') throw $e;
+        fail('ยังไม่มีตาราง ' . $table . ' — นำเข้า db/schema.sql ก่อนใช้งาน', 503);
+    }
+}
+
 /**
  * Refuses repair-job actions while repair_jobs still has the pre-migration photo
  * columns, so users see the migration hint instead of a plain 500.
  */
 function requirePhotoSchema(PDO $db): void {
-    try {
-        $rows = $db->query('SHOW COLUMNS FROM repair_jobs')->fetchAll();
-    } catch (PDOException $e) {
-        if ($e->getCode() !== '42S02') throw $e;
-        fail('ยังไม่มีตาราง repair_jobs — นำเข้า db/schema.sql ก่อนใช้งาน', 503);
-    }
+    $rows = tableColumns($db, 'repair_jobs');
 
     $missing = array_diff(['before_photo_path', 'after_photo_path'], array_column($rows, 'Field'));
     $blobs = ['before_photo_data_url', 'after_photo_data_url'];
@@ -106,6 +121,11 @@ function requirePhotoSchema(PDO $db): void {
         default => '',
     };
     if ($problem !== '') fail($problem . PHOTO_SCHEMA_HINT, 503);
+}
+
+/** assessments has no photo columns, but a missing table is still a deploy mistake. */
+function requireAssessmentSchema(PDO $db): void {
+    tableColumns($db, 'assessments');
 }
 function verifyPin(array $input, array $config): void {
     $expected = (string) $config['staff_pin'];
@@ -175,7 +195,7 @@ try {
         if (strcasecmp($originHost, $_SERVER['HTTP_HOST'] ?? '') !== 0) fail('Origin ไม่ได้รับอนุญาต', 403);
     }
     $raw = (string) file_get_contents('php://input', false, null, 0, 7 * 1024 * 1024 + 1);
-    if (strlen($raw) > 7 * 1024 * 1024) fail('ข้อมูลหรือรูปภาพมีขนาดใหญ่เกินไป', 413);
+    if (strlen($raw) > MAX_REQUEST_BYTES) fail('ข้อมูลหรือรูปภาพมีขนาดใหญ่เกินไป', 413);
     try { $input = json_decode($raw, true, 32, JSON_THROW_ON_ERROR); }
     catch (JsonException $e) { fail('JSON ไม่ถูกต้อง'); }
     if (!is_array($input)) fail('ข้อมูลไม่ถูกต้อง');
@@ -190,17 +210,20 @@ try {
         fail('ไม่รู้จักคำสั่ง');
     }
     // Public write actions: honeypot first, then the per-IP limit.
+    $clientIp = clientIp($config['trusted_proxies'] ?? []);
     if ($action === 'createIssue' || $action === 'submitAssessment') {
         cr_reject_honeypot($input);
         rateLimitCleanup();
-        if (!rateLimitHit($action, clientIp())) {
+        if (!rateLimitHit($action, $clientIp)) {
             header('Retry-After: 60');
             fail('ทำรายการบ่อยเกินไป กรุณารอสักครู่แล้วลองใหม่', 429);
         }
     }
     if ($action === 'updateStatus') verifyPin($input, $config);
     $db = openDatabase($config);
+    // Missing tables or columns would otherwise surface as a generic 500.
     if (in_array($action, REPAIR_ACTIONS, true)) requirePhotoSchema($db);
+    if (in_array($action, ASSESSMENT_ACTIONS, true)) requireAssessmentSchema($db);
     if ($action === 'listIssues') {
         $rows = $db->query('SELECT * FROM repair_jobs ORDER BY row_index')->fetchAll();
         respond(['ok' => true, 'issues' => array_map('issueRow', $rows)]);
@@ -213,7 +236,7 @@ try {
             field($item, 'groupId', 100, true, CAP_CODE), field($item, 'zone', 255, true, CAP_NAME),
             field($item, 'category', 255, false, CAP_NAME), field($item, 'riskLevel', 100, false, CAP_NAME),
             field($item, 'locationDetail', 20000, false, CAP_TEXT), field($item, 'suggestion', 20000, false, CAP_TEXT),
-            photoField($item, 'beforePhotoDataUrl'), ''];
+            photoField($item, 'beforePhotoDataUrl', $clientIp, (int) ($config['upload_daily_bytes'] ?? 0)), ''];
         $query = $db->prepare('INSERT INTO repair_jobs (created_date,due_date,group_id,zone,category,risk_level,location_detail,suggestion,before_photo_path,staff_note) VALUES (?,?,?,?,?,?,?,?,?,?)');
         $query->execute($values);
         respond(['ok' => true, 'issue' => issue($db, (int) $db->lastInsertId())]);

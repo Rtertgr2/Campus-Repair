@@ -7,6 +7,14 @@ $config = [
     'username' => getenv('DB_USER') ?: 'root',
     'password' => getenv('DB_PASSWORD') === false ? '' : getenv('DB_PASSWORD'),
     'staff_pin' => getenv('STAFF_PIN') ?: '',
+    // Per-IP daily photo budget for the public form, in bytes (0 disables it).
+    'upload_daily_bytes' => (int) (getenv('UPLOAD_DAILY_BYTES') ?: 50 * 1024 * 1024),
+    // Proxy IPs (comma separated) whose X-Forwarded-For is trusted; empty means the
+    // header is ignored, because anyone can send it.
+    'trusted_proxies' => array_values(array_filter(
+        array_map('trim', explode(',', (string) (getenv('TRUSTED_PROXIES') ?: ''))),
+        fn($ip) => filter_var($ip, FILTER_VALIDATE_IP) !== false
+    )),
 ];
 $local = __DIR__ . '/config.local.php';
 if (is_file($local)) {
