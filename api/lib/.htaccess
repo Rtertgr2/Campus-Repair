@@ -1,0 +1,8 @@
+# ไฟล์ภายใน — เรียกผ่าน index.php เท่านั้น
+<IfModule mod_authz_core.c>
+    Require all denied
+</IfModule>
+<IfModule !mod_authz_core.c>
+    Order allow,deny
+    Deny from all
+</IfModule>

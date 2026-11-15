@@ -1,0 +1,8 @@
+# สถานะชั่วคราวของเซิร์ฟเวอร์ (เช่น จำนวนครั้งที่กรอก PIN ผิด) — ห้ามเปิดผ่านเว็บ
+<IfModule mod_authz_core.c>
+    Require all denied
+</IfModule>
+<IfModule !mod_authz_core.c>
+    Order allow,deny
+    Deny from all
+</IfModule>

@@ -1,0 +1,19 @@
+# SPA fallback สำหรับ Apache / XAMPP
+# ไฟล์นี้ถูกคัดลอกเข้า dist/ อัตโนมัติเมื่อ `npm run build`
+# ทำให้เปิด /audit หรือ /tracker ตรง ๆ ได้ (ไม่ต้องมี index.html ในทุกโฟลเดอร์)
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    # ไฟล์หรือโฟลเดอร์ที่มีอยู่จริงให้เสิร์ฟตามปกติ (เช่น assets/, api/)
+    RewriteCond %{REQUEST_FILENAME} -f [OR]
+    RewriteCond %{REQUEST_FILENAME} -d
+    RewriteRule ^ - [L]
+
+    # ที่เหลือให้ React Router จัดการ
+    RewriteRule ^ index.html [L]
+</IfModule>
+
+<IfModule mod_mime.c>
+    AddType application/javascript .js
+    AddType text/css .css
+</IfModule>

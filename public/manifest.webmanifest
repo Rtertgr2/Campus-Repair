@@ -1,0 +1,20 @@
+{
+  "name": "Campus Repair — แจ้งซ่อมสถานที่",
+  "short_name": "Campus Repair",
+  "description": "แจ้งซ่อมสถานที่และของส่วนรวมที่ชำรุด พร้อมติดตามสถานะจนซ่อมเสร็จ",
+  "lang": "th",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#fbfdfb",
+  "theme_color": "#14683f",
+  "icons": [
+    {
+      "src": "favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
