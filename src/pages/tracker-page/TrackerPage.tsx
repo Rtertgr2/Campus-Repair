@@ -10,6 +10,24 @@ type ActionMode = "close" | "reopen"
 const statusLabel = (status: string) =>
   status === STATUS_CLOSED ? "ซ่อมเสร็จแล้ว" : status === STATUS_PENDING ? "รอซ่อม" : status
 
+/** Small preview from the thumbnail; clicking opens the full photo. */
+const PhotoThumb: React.FC<{ path: string; thumb: string; label: string }> = ({ path, thumb, label }) => (
+  <a href={path} target="_blank" rel="noreferrer" title={label}>
+    <img
+      src={thumb || path}
+      alt={label}
+      loading="lazy"
+      style={{
+        inlineSize: 56,
+        blockSize: 56,
+        objectFit: "cover",
+        borderRadius: "var(--radius-sm)",
+        display: "block",
+      }}
+    />
+  </a>
+)
+
 const TrackerPage: React.FC = () => {
   const { isStaff, pin, login } = useStaff()
 
@@ -24,7 +42,7 @@ const TrackerPage: React.FC = () => {
   const [pinInput, setPinInput] = useState<string>("")
   const [formError, setFormError] = useState<string>("")
   const [staffNote, setStaffNote] = useState<string>("")
-  const [afterPhoto, setAfterPhoto] = useState<{ dataUrl: string; name: string } | null>(null)
+  const [afterPhoto, setAfterPhoto] = useState<string | null>(null)
 
   const loadIssues = useCallback(async () => {
     setLoading(true)
@@ -68,9 +86,7 @@ const TrackerPage: React.FC = () => {
 
     const reader = new FileReader()
     reader.onload = async (event) => {
-      const dataUrl = event.target?.result as string
-      const resized = await downscaleImage(dataUrl)
-      setAfterPhoto({ dataUrl: resized, name: file.name.replace(/\.[^.]+$/, "") })
+      setAfterPhoto(await downscaleImage(event.target?.result as string))
     }
     reader.readAsDataURL(file)
   }
@@ -105,8 +121,7 @@ const TrackerPage: React.FC = () => {
         ...(action.mode === "close"
           ? {
               staffNote: staffNote.trim(),
-              afterPhotoDataUrl: afterPhoto?.dataUrl,
-              afterPhotoName: afterPhoto?.name,
+              afterPhotoDataUrl: afterPhoto ?? undefined,
             }
           : {}),
       })
@@ -247,10 +262,19 @@ const TrackerPage: React.FC = () => {
                         {issue.closedDate ? ` • ซ่อมเสร็จ ${issue.closedDate}` : ` • ครบกำหนด ${issue.dueDate}`}
                       </span>
                       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                        {issue.beforePhoto && (
+                          <PhotoThumb
+                            path={issue.beforePhoto}
+                            thumb={issue.beforePhotoThumb}
+                            label="ภาพก่อนซ่อม"
+                          />
+                        )}
                         {issue.afterPhoto && (
-                          <a className="report-action" href={issue.afterPhoto} target="_blank" rel="noreferrer">
-                            ภาพหลังซ่อม
-                          </a>
+                          <PhotoThumb
+                            path={issue.afterPhoto}
+                            thumb={issue.afterPhotoThumb}
+                            label="ภาพหลังซ่อม"
+                          />
                         )}
                         <button
                           className="report-action"
@@ -322,7 +346,7 @@ const TrackerPage: React.FC = () => {
                 />
                 {afterPhoto && (
                   <img
-                    src={afterPhoto.dataUrl}
+                    src={afterPhoto}
                     alt="หลังซ่อม"
                     style={{ width: "100%", height: "auto", borderRadius: "var(--radius-sm)", marginTop: 8 }}
                   />

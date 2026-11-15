@@ -1,0 +1,15 @@
+# โค้ดฝั่งเซิร์ฟเวอร์ในโฟลเดอร์นี้: ปิดการดูรายการไฟล์ และห้ามเรียกไฟล์ config ตรง ๆ
+# config.php / config.local.php ถูกโหลดด้วย require จาก index.php เท่านั้น
+# (ไฟล์ .php ถูก Apache ประมวลผลอยู่แล้ว แต่การปิดไว้กันกรณี PHP ถูกปิด/ตั้งค่าไม่ครบ)
+
+Options -Indexes
+
+<FilesMatch "^config.*\.php$">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order allow,deny
+        Deny from all
+    </IfModule>
+</FilesMatch>

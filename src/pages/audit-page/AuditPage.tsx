@@ -21,6 +21,8 @@ interface IssueFormData {
   suggestion: string
   photoBase64?: string
   photoName?: string
+  /** Honeypot: hidden from humans, filled by bots. */
+  website: string
 }
 
 const categories = [
@@ -44,6 +46,7 @@ const AuditPage: React.FC = () => {
     suggestion: "",
     photoBase64: undefined,
     photoName: undefined,
+    website: "",
   })
 
   const [showPhotoPreview, setShowPhotoPreview] = useState(false)
@@ -89,6 +92,7 @@ const AuditPage: React.FC = () => {
         locationDetail: formData.locationDetail,
         suggestion: formData.suggestion,
         beforePhotoDataUrl: formData.photoBase64,
+        website: formData.website,
       })
 
       setMessage({
@@ -96,7 +100,7 @@ const AuditPage: React.FC = () => {
         text:
           `แจ้งซ่อมสำเร็จ! หมายเลขงาน: ${issue.id}` +
           ` • ครบกำหนดติดตาม ${issue.dueDate}` +
-          (issue.beforePhoto ? " • อัปโหลดรูปขึ้น Google Drive แล้ว" : ""),
+          (issue.beforePhoto ? " • แนบรูปกับรายการแล้ว" : ""),
       })
 
       setFormData({
@@ -108,6 +112,7 @@ const AuditPage: React.FC = () => {
         suggestion: "",
         photoBase64: undefined,
         photoName: undefined,
+        website: "",
       })
       setShowPhotoPreview(false)
       setPreviewImage("")
@@ -153,6 +158,29 @@ const AuditPage: React.FC = () => {
             )}
 
             <form onSubmit={handleSubmit} noValidate>
+              {/* Honeypot: off-screen, never focusable, never announced to users. */}
+              <div
+                aria-hidden="true"
+                style={{
+                  position: "absolute",
+                  inlineSize: 1,
+                  blockSize: 1,
+                  overflow: "hidden",
+                  clip: "rect(0 0 0 0)",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                <label htmlFor="formWebsite">Website</label>
+                <input
+                  id="formWebsite"
+                  name="website"
+                  type="text"
+                  tabIndex={-1}
+                  autoComplete="off"
+                  value={formData.website}
+                  onChange={(e) => setFormData({ ...formData, website: e.target.value })}
+                />
+              </div>
               <div className="field">
                 <label htmlFor="formGroupId">
                   อาคาร/พื้นที่ <span className="req" aria-hidden="true">*</span>
@@ -253,7 +281,7 @@ const AuditPage: React.FC = () => {
                 <input id="formPhoto" type="file" accept="image/*" onChange={handlePhotoChange} />
                 <p className="field-help">
                   {formData.photoBase64
-                    ? "รูปภาพถูกย่อขนาดแล้ว พร้อมอัปโหลดขึ้น Google Drive"
+                    ? "รูปภาพถูกย่อขนาดแล้ว พร้อมแนบไปกับรายการแจ้งซ่อม"
                     : "ถ่ายรูปเพื่ออัปโหลด (จะถูกย่อขนาดอัตโนมัติ)"}
                 </p>
               </div>

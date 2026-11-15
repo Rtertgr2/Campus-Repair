@@ -1,0 +1,7 @@
+# index.html อ้างถึง asset ที่มี hash ในชื่อไฟล์ จึงห้ามให้เบราว์เซอร์ cache หน้านี้
+# ไฟล์ใต้ assets/ เปลี่ยนชื่อทุกครั้งที่ build อยู่แล้ว จึง cache ได้ตามปกติ
+<IfModule mod_headers.c>
+    <FilesMatch "^index\.html$">
+        Header set Cache-Control "no-cache, must-revalidate"
+    </FilesMatch>
+</IfModule>

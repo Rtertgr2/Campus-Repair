@@ -1,17 +1,6 @@
-/**
- * Client for the Campus Repair Google Apps Script backend.
- *
- * Every call is a POST of a JSON body with an `action`, sent as
- * `text/plain` so the browser does not issue a CORS preflight (Apps Script
- * web apps cannot answer one).
- *
- * When VITE_API_URL is not set the module falls back to an in-memory store so
- * the app stays usable locally; `isBackendConfigured` is exported so the UI can
- * say so instead of pretending data was saved.
- */
-
-export const API_URL = String(import.meta.env.VITE_API_URL ?? "").trim()
-export const isBackendConfigured = API_URL.length > 0
+/** PHP/MySQL API. Explicit VITE_API_URL=demo enables temporary demo data. */
+export const API_URL = String(import.meta.env.VITE_API_URL ?? "./api/index.php").trim()
+export const isBackendConfigured = API_URL.length > 0 && API_URL !== "demo"
 
 export const STATUS_PENDING = "รอแก้ไข"
 export const STATUS_CLOSED = "ปิดงานแล้ว"
@@ -28,9 +17,11 @@ export interface Issue {
   locationDetail: string
   suggestion: string
   beforePhoto: string
+  beforePhotoThumb: string
   status: string
   closedDate: string
   afterPhoto: string
+  afterPhotoThumb: string
   staffNote: string
 }
 
@@ -42,6 +33,8 @@ export interface NewIssueInput {
   locationDetail: string
   suggestion: string
   beforePhotoDataUrl?: string
+  /** Honeypot: left empty by humans, filled by bots. */
+  website?: string
 }
 
 export interface StatusUpdateInput {
@@ -50,7 +43,6 @@ export interface StatusUpdateInput {
   status: string
   staffNote?: string
   afterPhotoDataUrl?: string
-  afterPhotoName?: string
 }
 
 export interface Assessment {
@@ -77,54 +69,18 @@ export interface NewAssessmentInput {
   knowledgeTotal: number
   awarenessPoints: number
   awarenessMax: number
+  /** Honeypot: left empty by humans, filled by bots. */
+  website?: string
 }
 
-/** Shape returned by the Apps Script sheet rows (see apps-script/Code.gs). */
-interface RawIssue {
-  rowIndex: number
-  id: string
-  createdDate: string
-  dueDate: string
-  groupId: string
-  zone: string
-  category: string
-  riskLevel: string
-  locationDetail: string
-  suggestion: string
-  beforePhotoUrl: string
-  status: string
-  closedDate: string
-  afterPhotoUrl: string
-  staffNote: string
-}
-
+/** The PHP API already answers in these shapes (see public/api/index.php). */
 interface ApiResponse {
   ok: boolean
   error?: string
-  issues?: RawIssue[]
-  issue?: RawIssue
+  issues?: Issue[]
+  issue?: Issue
   assessments?: Assessment[]
   assessment?: Assessment
-}
-
-function toIssue(raw: RawIssue): Issue {
-  return {
-    rowIndex: Number(raw.rowIndex),
-    id: raw.id ?? "",
-    createdDate: raw.createdDate ?? "",
-    dueDate: raw.dueDate ?? "",
-    groupId: raw.groupId ?? "",
-    zone: raw.zone ?? "",
-    category: raw.category ?? "",
-    riskLevel: raw.riskLevel ?? "",
-    locationDetail: raw.locationDetail ?? "",
-    suggestion: raw.suggestion ?? "",
-    beforePhoto: raw.beforePhotoUrl ?? "",
-    status: raw.status || STATUS_PENDING,
-    closedDate: raw.closedDate ?? "",
-    afterPhoto: raw.afterPhotoUrl ?? "",
-    staffNote: raw.staffNote ?? "",
-  }
 }
 
 async function post(payload: Record<string, unknown>): Promise<ApiResponse> {
@@ -134,8 +90,7 @@ async function post(payload: Record<string, unknown>): Promise<ApiResponse> {
   try {
     response = await fetch(API_URL, {
       method: "POST",
-      redirect: "follow",
-      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     })
   } catch (err) {
@@ -145,39 +100,41 @@ async function post(payload: Record<string, unknown>): Promise<ApiResponse> {
     )
   }
 
-  if (!response.ok) {
-    throw new Error(`backend ตอบกลับผิดพลาด (HTTP ${response.status})`)
-  }
-
+  // The API answers 4xx/5xx with { ok: false, error }, so read the body first
+  // and show that message instead of a bare HTTP status.
   let data: ApiResponse
   try {
     data = (await response.json()) as ApiResponse
   } catch {
-    throw new Error("backend ส่งข้อมูลที่ไม่ใช่ JSON กลับมา (ตรวจสอบ URL /exec)")
+    throw new Error(
+      `backend ส่งข้อมูลที่ไม่ใช่ JSON กลับมา (HTTP ${response.status}) — ตรวจสอบ URL ของ API และให้ PHP ทำงานบนเซิร์ฟเวอร์`,
+    )
   }
 
-  if (!data.ok) throw new Error(data.error || "คำขอถูกปฏิเสธจาก backend")
+  if (!data.ok) {
+    throw new Error(data.error || `backend ตอบกลับผิดพลาด (HTTP ${response.status})`)
+  }
   return data
 }
 
 export const api = {
   async listIssues(): Promise<Issue[]> {
     const data = await post({ action: "listIssues" })
-    return (data.issues ?? []).map(toIssue)
+    return data.issues ?? []
   },
 
   async createIssue(input: NewIssueInput): Promise<Issue> {
     if (!input.groupId || !input.zone) throw new Error("กรุณาเลือกอาคาร/พื้นที่")
-    const data = await post({ action: "createIssue", issue: input })
+    const data = await post({ action: "createIssue", issue: input, website: input.website ?? "" })
     if (!data.issue) throw new Error("backend ไม่ได้ส่งข้อมูลรายการที่บันทึกกลับมา")
-    return toIssue(data.issue)
+    return data.issue
   },
 
   async updateStatus(input: StatusUpdateInput): Promise<Issue> {
     if (!input.pin) throw new Error("ต้องยืนยันรหัส PIN เจ้าหน้าที่ก่อน")
     const data = await post({ action: "updateStatus", ...input })
     if (!data.issue) throw new Error("backend ไม่ได้ส่งข้อมูลรายการที่อัปเดตกลับมา")
-    return toIssue(data.issue)
+    return data.issue
   },
 
   async verifyPin(pin: string): Promise<boolean> {
@@ -198,15 +155,19 @@ export const api = {
     if (!input.studentId || !input.studentName || !input.groupId) {
       throw new Error("กรุณากรอกข้อมูลให้ครบถ้วน")
     }
-    const data = await post({ action: "submitAssessment", assessment: input })
+    const data = await post({
+      action: "submitAssessment",
+      assessment: input,
+      website: input.website ?? "",
+    })
     if (!data.assessment) throw new Error("backend ไม่ได้ส่งผลการประเมินกลับมา")
     return data.assessment
   },
 }
 
 /* --------------------------------------------------------------------------
- * Local fallback store — used only when VITE_API_URL is empty.
- * Nothing here persists across a page reload and nothing is written to Sheets.
+ * Local fallback store — used only when VITE_API_URL is empty or demo.
+ * Nothing here persists across a page reload.
  * ------------------------------------------------------------------------ */
 
 const STAFF_PIN_FALLBACK = "1234"
@@ -218,6 +179,13 @@ function today(): string {
     year: "numeric",
   })
 }
+
+/** Placeholder image so the demo store has something to render. */
+const MOCK_PHOTO =
+  "data:image/svg+xml;charset=utf-8," +
+  encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="480" height="360"><rect width="480" height="360" fill="#e3eaf2"/><text x="240" y="186" font-family="sans-serif" font-size="18" fill="#5b6b7c" text-anchor="middle">ตัวอย่างรูป (โหมดสาธิต)</text></svg>',
+  )
 
 let mockIssues: Issue[] = [
   {
@@ -232,9 +200,11 @@ let mockIssues: Issue[] = [
     locationDetail: "หลอดไฟทางเข้าอาคารหลักดับ",
     suggestion: "เปลี่ยนหลอดไฟและตรวจสอบสายไฟ",
     beforePhoto: "",
+    beforePhotoThumb: "",
     status: STATUS_PENDING,
     closedDate: "",
     afterPhoto: "",
+    afterPhotoThumb: "",
     staffNote: "",
   },
   {
@@ -249,9 +219,11 @@ let mockIssues: Issue[] = [
     locationDetail: "ก๊อกน้ำห้องน้ำชั้น 1 รั่ว",
     suggestion: "เปลี่ยนก๊อกน้ำและตรวจสอบท่อ",
     beforePhoto: "",
+    beforePhotoThumb: "",
     status: STATUS_CLOSED,
     closedDate: "20/01/2026",
     afterPhoto: "",
+    afterPhotoThumb: "",
     staffNote: "ซ่อมเสร็จโดยทีมงานอาคารสถานที่",
   },
   {
@@ -266,9 +238,11 @@ let mockIssues: Issue[] = [
     locationDetail: "โต๊ะอาหารชำรุด 2 ตัว",
     suggestion: "ซ่อมหรือเปลี่ยนโต๊ะที่ชำรุด",
     beforePhoto: "",
+    beforePhotoThumb: "",
     status: STATUS_PENDING,
     closedDate: "",
     afterPhoto: "",
+    afterPhotoThumb: "",
     staffNote: "",
   },
 ]
@@ -287,7 +261,7 @@ function mockHandle(payload: Record<string, unknown>): ApiResponse {
   const action = payload.action
 
   if (action === "listIssues") {
-    return { ok: true, issues: mockIssues as unknown as RawIssue[] }
+    return { ok: true, issues: mockIssues }
   }
 
   if (action === "verifyPin") {
@@ -312,14 +286,16 @@ function mockHandle(payload: Record<string, unknown>): ApiResponse {
       riskLevel: input.riskLevel,
       locationDetail: input.locationDetail,
       suggestion: input.suggestion,
-      beforePhoto: input.beforePhotoDataUrl ? "mock://photo" : "",
+      beforePhoto: input.beforePhotoDataUrl ? MOCK_PHOTO : "",
+      beforePhotoThumb: input.beforePhotoDataUrl ? MOCK_PHOTO : "",
       status: STATUS_PENDING,
       closedDate: "",
       afterPhoto: "",
+      afterPhotoThumb: "",
       staffNote: "",
     }
     mockIssues = [...mockIssues, issue]
-    return { ok: true, issue: issue as unknown as RawIssue }
+    return { ok: true, issue }
   }
 
   if (action === "updateStatus") {
@@ -336,10 +312,13 @@ function mockHandle(payload: Record<string, unknown>): ApiResponse {
       status: closing ? STATUS_CLOSED : STATUS_PENDING,
       closedDate: closing ? today() : "",
       staffNote: update.staffNote ?? mockIssues[index].staffNote,
-      afterPhoto: update.afterPhotoDataUrl ? "mock://after-photo" : mockIssues[index].afterPhoto,
+      afterPhoto: update.afterPhotoDataUrl ? MOCK_PHOTO : mockIssues[index].afterPhoto,
+      afterPhotoThumb: update.afterPhotoDataUrl
+        ? MOCK_PHOTO
+        : mockIssues[index].afterPhotoThumb,
     }
     mockIssues = mockIssues.map((issue, i) => (i === index ? updated : issue))
-    return { ok: true, issue: updated as unknown as RawIssue }
+    return { ok: true, issue: updated }
   }
 
   if (action === "listAssessments") {
