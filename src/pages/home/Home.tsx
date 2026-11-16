@@ -1,50 +1,38 @@
 import React, { useEffect, useState } from "react"
 import { Link } from "react-router-dom"
-import { api, STATUS_CLOSED } from "../../lib/api"
+import { api, Stats, Zone } from "../../lib/api"
+
+const FALLBACK_ZONES: Zone[] = [
+  { id: 1, groupId: "B01", name: "อาคารเรียน 1", detail: "ห้องเรียนและห้องปฏิบัติการ", active: true, sortOrder: 10 },
+  { id: 2, groupId: "B02", name: "อาคารเรียน 2", detail: "ห้องเรียนและห้องพักครู", active: true, sortOrder: 20 },
+  { id: 3, groupId: "B03", name: "อาคารอเนกประสงค์", detail: "ห้องประชุมและกิจกรรม", active: true, sortOrder: 30 },
+  { id: 4, groupId: "B04", name: "โรงอาหาร", detail: "พื้นที่รับประทานอาหาร", active: true, sortOrder: 40 },
+  { id: 5, groupId: "B05", name: "หอสมุด", detail: "ห้องอ่านหนังสือและคอมพิวเตอร์", active: true, sortOrder: 50 },
+]
 
 const Home: React.FC = () => {
-  const [kpiData, setKPIData] = useState({
-    totalGroups: "-",
-    totalIssues: "-",
-    closureRate: "0",
-  })
+  const [stats, setStats] = useState<Stats>({ total: 0, closed: 0, pending: 0, groups: 0, dueSoon: 0 })
+  const [zones, setZones] = useState<Zone[]>(FALLBACK_ZONES)
   const [error, setError] = useState<string>("")
 
   useEffect(() => {
     let cancelled = false
-
-    const fetchData = async () => {
-      try {
-        const issues = await api.listIssues()
+    Promise.all([api.getStats(), api.listZones()])
+      .then(([nextStats, nextZones]) => {
         if (cancelled) return
-
-        const totalIssues = issues.length
-        const closed = issues.filter((issue) => issue.status === STATUS_CLOSED).length
-        const groups = new Set(issues.map((issue) => issue.groupId).filter(Boolean))
-
-        setKPIData({
-          totalGroups: String(groups.size),
-          totalIssues: String(totalIssues),
-          closureRate: String(totalIssues > 0 ? Math.round((closed / totalIssues) * 100) : 0),
-        })
-      } catch (err) {
+        setStats(nextStats)
+        const active = nextZones.filter((zone) => zone.active)
+        if (active.length > 0) setZones(active)
+      })
+      .catch((err) => {
         if (!cancelled) setError(err instanceof Error ? err.message : String(err))
-      }
-    }
-
-    fetchData()
+      })
     return () => {
       cancelled = true
     }
   }, [])
 
-  const buildings = [
-    { name: "อาคารเรียน 1", detail: "ห้องเรียนและห้องปฏิบัติการ" },
-    { name: "อาคารเรียน 2", detail: "ห้องเรียนและห้องพักครู" },
-    { name: "อาคารอเนกประสงค์", detail: "ห้องประชุมและกิจกรรม" },
-    { name: "โรงอาหาร", detail: "พื้นที่รับประทานอาหาร" },
-    { name: "หอสมุด", detail: "ห้องอ่านหนังสือและคอมพิวเตอร์" },
-  ]
+  const closureRate = stats.total > 0 ? Math.round((stats.closed / stats.total) * 100) : 0
 
   const steps = [
     {
@@ -129,20 +117,20 @@ const Home: React.FC = () => {
             {error && <p className="form-summary">โหลดข้อมูลไม่สำเร็จ: {error}</p>}
             <div className="kpi-grid">
               <span className="od-stat">
-                <span className="stat-num" id="kpi-groups">{kpiData.totalGroups}</span>
+                <span className="stat-num" id="kpi-groups">{stats.groups}</span>
                 <span className="stat-cap">อาคารที่มีการแจ้ง</span>
               </span>
               <span className="od-stat">
-                <span className="stat-num" id="kpi-issues">{kpiData.totalIssues}</span>
+                <span className="stat-num" id="kpi-issues">{stats.total}</span>
                 <span className="stat-cap">งานแจ้งซ่อม</span>
               </span>
               <span className="od-stat">
-                <span className="stat-num" id="kpi-closure">{kpiData.closureRate}%</span>
+                <span className="stat-num" id="kpi-closure">{closureRate}%</span>
                 <span className="stat-cap">ซ่อมเสร็จแล้ว</span>
               </span>
               <span className="od-stat">
-                <span className="stat-num">30</span>
-                <span className="stat-cap">วันติดตามผล</span>
+                <span className="stat-num" id="kpi-due">{stats.dueSoon}</span>
+                <span className="stat-cap">ใกล้ครบกำหนด</span>
               </span>
             </div>
             <div className="chips">
@@ -174,10 +162,10 @@ const Home: React.FC = () => {
             <p>แจ้งซ่อมได้ทุกอาคารภายในสถานศึกษา เลือกอาคารให้ตรงกับจุดที่พบ</p>
           </div>
           <div className="zone-grid">
-            {buildings.map((building) => (
-              <div className="zone-card" key={building.name}>
-                <h3>{building.name}</h3>
-                <p>{building.detail}</p>
+            {zones.map((zone) => (
+              <div className="zone-card" key={zone.groupId}>
+                <h3>{zone.name}</h3>
+                <p>{zone.detail}</p>
                 <p style={{ marginTop: 8 }}>
                   <span className="zone-chip">เปิดรับแจ้งซ่อม</span>
                 </p>

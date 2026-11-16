@@ -1,15 +1,14 @@
-import React, { useState } from "react"
+import React, { useEffect, useState } from "react"
 import { Modal } from "react-bootstrap"
-import { api } from "../../lib/api"
+import { api, Zone } from "../../lib/api"
 import { downscaleImage } from "../../lib/image"
 
-// Buildings available for repair reports - in a real app this would come from the API
-const MOCK_LOCATIONS = [
-  { id: "B01", name: "อาคารเรียน 1", zone: "อาคารเรียน 1" },
-  { id: "B02", name: "อาคารเรียน 2", zone: "อาคารเรียน 2" },
-  { id: "B03", name: "อาคารอเนกประสงค์", zone: "อาคารอเนกประสงค์" },
-  { id: "B04", name: "โรงอาหาร", zone: "โรงอาหาร" },
-  { id: "B05", name: "หอสมุด", zone: "หอสมุด" },
+const FALLBACK_ZONES: Zone[] = [
+  { id: 1, groupId: "B01", name: "อาคารเรียน 1", detail: "ห้องเรียนและห้องปฏิบัติการ", active: true, sortOrder: 10 },
+  { id: 2, groupId: "B02", name: "อาคารเรียน 2", detail: "ห้องเรียนและห้องพักครู", active: true, sortOrder: 20 },
+  { id: 3, groupId: "B03", name: "อาคารอเนกประสงค์", detail: "ห้องประชุมและกิจกรรม", active: true, sortOrder: 30 },
+  { id: 4, groupId: "B04", name: "โรงอาหาร", detail: "พื้นที่รับประทานอาหาร", active: true, sortOrder: 40 },
+  { id: 5, groupId: "B05", name: "หอสมุด", detail: "ห้องอ่านหนังสือและคอมพิวเตอร์", active: true, sortOrder: 50 },
 ]
 
 interface IssueFormData {
@@ -19,8 +18,10 @@ interface IssueFormData {
   riskLevel: string
   locationDetail: string
   suggestion: string
+  reporterName: string
+  reporterPhone: string
+  reporterEmail: string
   photoBase64?: string
-  photoName?: string
   /** Honeypot: hidden from humans, filled by bots. */
   website: string
 }
@@ -36,23 +37,43 @@ const categories = [
 ]
 const urgencyLevels = ["ปกติ", "เร่งด่วน", "ฉุกเฉิน"]
 
-const AuditPage: React.FC = () => {
-  const [formData, setFormData] = useState<IssueFormData>({
-    groupId: "",
-    zone: "",
-    category: "",
-    riskLevel: "",
-    locationDetail: "",
-    suggestion: "",
-    photoBase64: undefined,
-    photoName: undefined,
-    website: "",
-  })
+const emptyForm: IssueFormData = {
+  groupId: "",
+  zone: "",
+  category: "",
+  riskLevel: "",
+  locationDetail: "",
+  suggestion: "",
+  reporterName: "",
+  reporterPhone: "",
+  reporterEmail: "",
+  photoBase64: undefined,
+  website: "",
+}
 
+const AuditPage: React.FC = () => {
+  const [formData, setFormData] = useState<IssueFormData>(emptyForm)
+  const [zones, setZones] = useState<Zone[]>(FALLBACK_ZONES)
   const [showPhotoPreview, setShowPhotoPreview] = useState(false)
   const [previewImage, setPreviewImage] = useState<string>("")
   const [submitting, setSubmitting] = useState(false)
   const [message, setMessage] = useState<{ variant: string; text: string } | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    api
+      .listZones()
+      .then((items) => {
+        const active = items.filter((zone) => zone.active)
+        if (!cancelled && active.length > 0) setZones(active)
+      })
+      .catch(() => {
+        /* keep the built-in list when the API is not reachable */
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -62,12 +83,7 @@ const AuditPage: React.FC = () => {
     reader.onload = async (event) => {
       const base64String = event.target?.result as string
       const resized = await downscaleImage(base64String)
-
-      setFormData((prev) => ({
-        ...prev,
-        photoBase64: resized,
-        photoName: file.name.replace(/\.[^.]+$/, ""),
-      }))
+      setFormData((prev) => ({ ...prev, photoBase64: resized }))
       setPreviewImage(resized)
       setShowPhotoPreview(true)
     }
@@ -81,6 +97,10 @@ const AuditPage: React.FC = () => {
       setMessage({ variant: "warning", text: "กรุณาเลือกอาคาร/พื้นที่ที่พบปัญหา" })
       return
     }
+    if (!formData.reporterName.trim()) {
+      setMessage({ variant: "warning", text: "กรุณากรอกชื่อผู้แจ้งเพื่อให้ทีมช่างติดต่อกลับได้" })
+      return
+    }
 
     setSubmitting(true)
     try {
@@ -91,6 +111,9 @@ const AuditPage: React.FC = () => {
         riskLevel: formData.riskLevel,
         locationDetail: formData.locationDetail,
         suggestion: formData.suggestion,
+        reporterName: formData.reporterName.trim(),
+        reporterPhone: formData.reporterPhone.trim(),
+        reporterEmail: formData.reporterEmail.trim(),
         beforePhotoDataUrl: formData.photoBase64,
         website: formData.website,
       })
@@ -102,18 +125,7 @@ const AuditPage: React.FC = () => {
           ` • ครบกำหนดติดตาม ${issue.dueDate}` +
           (issue.beforePhoto ? " • แนบรูปกับรายการแล้ว" : ""),
       })
-
-      setFormData({
-        groupId: "",
-        zone: "",
-        category: "",
-        riskLevel: "",
-        locationDetail: "",
-        suggestion: "",
-        photoBase64: undefined,
-        photoName: undefined,
-        website: "",
-      })
+      setFormData(emptyForm)
       setShowPhotoPreview(false)
       setPreviewImage("")
     } catch (err) {
@@ -181,6 +193,7 @@ const AuditPage: React.FC = () => {
                   onChange={(e) => setFormData({ ...formData, website: e.target.value })}
                 />
               </div>
+
               <div className="field">
                 <label htmlFor="formGroupId">
                   อาคาร/พื้นที่ <span className="req" aria-hidden="true">*</span>
@@ -197,9 +210,9 @@ const AuditPage: React.FC = () => {
                   }
                 >
                   <option value="">เลือกอาคาร/พื้นที่</option>
-                  {MOCK_LOCATIONS.map((location) => (
-                    <option key={location.id} data-zone={location.zone} value={location.id}>
-                      {location.name}
+                  {zones.map((zone) => (
+                    <option key={zone.groupId} data-zone={zone.name} value={zone.groupId}>
+                      {zone.name}
                     </option>
                   ))}
                 </select>
@@ -276,9 +289,60 @@ const AuditPage: React.FC = () => {
                 />
               </div>
 
+              <fieldset className="field contact-fieldset">
+                <legend>ข้อมูลผู้แจ้ง</legend>
+                <p className="field-help">
+                  ใช้สำหรับให้ทีมช่างติดต่อกลับเมื่อต้องการสอบถามรายละเอียดเพิ่มเติม
+                </p>
+                <div className="field">
+                  <label htmlFor="formReporterName">
+                    ชื่อผู้แจ้ง <span className="req" aria-hidden="true">*</span>
+                  </label>
+                  <input
+                    id="formReporterName"
+                    type="text"
+                    autoComplete="name"
+                    placeholder="ชื่อ-นามสกุล หรือชื่อที่ใช้ติดต่อ"
+                    value={formData.reporterName}
+                    onChange={(e) => setFormData({ ...formData, reporterName: e.target.value })}
+                  />
+                </div>
+                <div className="field-row">
+                  <div className="field">
+                    <label htmlFor="formReporterPhone">เบอร์โทร</label>
+                    <input
+                      id="formReporterPhone"
+                      type="text"
+                      inputMode="tel"
+                      autoComplete="tel"
+                      placeholder="เช่น 0812345678"
+                      value={formData.reporterPhone}
+                      onChange={(e) => setFormData({ ...formData, reporterPhone: e.target.value })}
+                    />
+                  </div>
+                  <div className="field">
+                    <label htmlFor="formReporterEmail">อีเมล</label>
+                    <input
+                      id="formReporterEmail"
+                      type="email"
+                      autoComplete="email"
+                      placeholder="name@example.com"
+                      value={formData.reporterEmail}
+                      onChange={(e) => setFormData({ ...formData, reporterEmail: e.target.value })}
+                    />
+                  </div>
+                </div>
+              </fieldset>
+
               <div className="field">
                 <label htmlFor="formPhoto">รูปถ่ายสภาพก่อนซ่อม</label>
-                <input id="formPhoto" type="file" accept="image/*" onChange={handlePhotoChange} />
+                <input
+                  id="formPhoto"
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  onChange={handlePhotoChange}
+                />
                 <p className="field-help">
                   {formData.photoBase64
                     ? "รูปภาพถูกย่อขนาดแล้ว พร้อมแนบไปกับรายการแจ้งซ่อม"

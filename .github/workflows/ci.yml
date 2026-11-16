@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+  api:
+    runs-on: ubuntu-latest
+    services:
+      mariadb:
+        image: mariadb:10.11
+        env:
+          MARIADB_ALLOW_EMPTY_ROOT_PASSWORD: "yes"
+          MARIADB_DATABASE: campus_repair
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=12
+    env:
+      DB_HOST: 127.0.0.1
+      DB_PORT: 3306
+      DB_NAME: campus_repair
+      DB_USER: root
+      DB_PASSWORD: ""
+      STAFF_PIN: "1234"
+      STAFF_NAME: "เจ้าหน้าที่"
+      UPLOADS_DIR: ${{ github.workspace }}/public/uploads
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.3"
+          extensions: pdo_mysql, gd, mbstring
+      - name: PHP syntax
+        run: |
+          find public/api db -name '*.php' -print0 | xargs -0 -n1 php -l
+      - name: Migrate and check
+        run: |
+          php db/migrate.php
+          php db/deploy-check.php
+      - name: API smoke test
+        run: |
+          rm -f public/api/storage/ratelimit/*.json
+          php -S 127.0.0.1:8099 -t public > /tmp/php-server.log 2>&1 &
+          sleep 2
+          API_BASE=http://127.0.0.1:8099/api/index.php node tests/api-smoke.mjs

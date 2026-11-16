@@ -6,9 +6,10 @@ declare(strict_types=1);
  *   php db/deploy-check.php
  *   php db/deploy-check.php --uploads=/opt/lampp/htdocs/campus-repair/uploads
  *
- * ตรวจ: PHP + ส่วนขยาย, config, ต่อ MySQL ได้, ตาราง/คอลัมน์ครบ (repair_jobs, assessments),
- * คอลัมน์ base64 เดิมเป็น NULL ได้, โฟลเดอร์ uploads เขียนได้และอยู่ใต้รากเว็บ,
- * GD (thumbnail), STAFF_PIN, โฟลเดอร์นับ rate limit, พื้นที่ดิสก์
+ * ตรวจ: PHP + ส่วนขยาย, config, ต่อ MySQL ได้, ตาราง/คอลัมน์ครบ (repair_jobs,
+ * staff_users, staff_sessions, zones, repair_job_events), บัญชีเจ้าหน้าที่,
+ * โฟลเดอร์ uploads เขียนได้และอยู่ใต้รากเว็บ, GD (thumbnail), โฟลเดอร์นับ
+ * rate limit, พื้นที่ดิสก์
  *
  * อ่านค่าฐานข้อมูล/STAFF_PIN จาก public/api/config.php (environment หรือ config.local.php)
  * exit 0 = ผ่านทุกข้อ (คำเตือนไม่ทำให้ exit ผิด), exit 1 = มีข้อที่ต้องแก้ก่อนใช้งาน
@@ -93,13 +94,6 @@ $localConfig = __DIR__ . '/../public/api/config.local.php';
 $hasLocalConfig = is_file($localConfig);
 report($hasLocalConfig ? 'pass' : 'warn', 'public/api/config.local.php', $hasLocalConfig ? '' : 'ไม่พบ — ใช้ค่าจาก environment เท่านั้น');
 
-$pin = (string) ($config['staff_pin'] ?? '');
-if (!preg_match('/^[0-9]{6,}$/D', $pin)) {
-    report('fail', 'STAFF_PIN', $pin === '' ? 'ยังไม่ได้ตั้ง — ตั้ง env STAFF_PIN หรือ config.local.php' : 'ต้องเป็นตัวเลขอย่างน้อย 6 หลัก');
-} else {
-    report('pass', 'STAFF_PIN (' . strlen($pin) . ' หลัก)');
-}
-
 // -------------------------------------------------------------------- database
 $db = null;
 try {
@@ -109,18 +103,38 @@ try {
     report('fail', 'เชื่อมต่อ MySQL ไม่ได้', $e->getMessage());
 }
 
+$pin = (string) ($config['staff_pin'] ?? '');
+$staffCount = null;
+if ($db !== null) {
+    try {
+        $staffCount = (int) $db->query('SELECT COUNT(*) FROM staff_users')->fetchColumn();
+    } catch (Throwable $e) {
+        $staffCount = null;
+    }
+}
+if ($staffCount !== null && $staffCount > 0) {
+    report('pass', 'บัญชีเจ้าหน้าที่', $staffCount . ' บัญชี');
+} elseif (!preg_match('/^[0-9]{4,}$/D', $pin)) {
+    report('fail', 'STAFF_PIN', $pin === '' ? 'ยังไม่มีบัญชีเจ้าหน้าที่ — ตั้ง STAFF_PIN หรือรัน php db/create-staff.php' : 'ต้องเป็นตัวเลขอย่างน้อย 4 หลัก');
+} else {
+    report('pass', 'STAFF_PIN (' . strlen($pin) . ' หลัก) — ใช้สร้างบัญชีเริ่มต้นเมื่อล็อกอินครั้งแรก');
+}
+
 if ($db !== null) {
     $rows = columnsOf($db, 'repair_jobs');
     if ($rows === null) {
-        report('fail', 'ตาราง repair_jobs', 'ยังไม่มี — นำเข้า db/schema.sql ก่อน');
+        report('fail', 'ตาราง repair_jobs', 'ยังไม่มี — รัน php db/migrate.php');
     } else {
         report('pass', 'ตาราง repair_jobs');
         $columns = array_column($rows, 'Field');
-        $missing = array_diff(['before_photo_path', 'after_photo_path'], $columns);
+        $missing = array_diff([
+            'before_photo_path', 'after_photo_path', 'reporter_name', 'reporter_phone',
+            'reporter_email', 'assigned_staff_id',
+        ], $columns);
         report(
             $missing === [] ? 'pass' : 'fail',
-            'คอลัมน์รูป before_photo_path / after_photo_path',
-            $missing === [] ? '' : 'ขาด ' . implode(', ', $missing) . ' — รัน php db/migrate-photos.php'
+            'คอลัมน์รูปและข้อมูลผู้แจ้ง',
+            $missing === [] ? '' : 'ขาด ' . implode(', ', $missing) . ' — รัน php db/migrate.php'
         );
 
         $notNull = [];
@@ -133,13 +147,48 @@ if ($db !== null) {
             'คอลัมน์ base64 เดิมเป็น NULL ได้',
             $notNull === [] ? '' : implode(', ', $notNull) . ' ยังเป็น NOT NULL — รัน php db/migrate-photos.php'
         );
+
+        foreach ($rows as $row) {
+            if ($row['Field'] !== 'status') continue;
+            $missingStatuses = array_filter(
+                ['รับเรื่องแล้ว', 'กำลังซ่อม', 'รออะไหล่', 'ซ่อมไม่ได้', 'ยกเลิก'],
+                fn(string $status) => strpos((string) $row['Type'], $status) === false
+            );
+            report(
+                $missingStatuses === [] ? 'pass' : 'fail',
+                'สถานะงานครบทุกขั้น',
+                $missingStatuses === [] ? '' : 'ขาด ' . implode(', ', $missingStatuses) . ' — รัน php db/migrate.php'
+            );
+        }
     }
-    $assessmentColumns = columnsOf($db, 'assessments');
-    report(
-        $assessmentColumns === null ? 'fail' : 'pass',
-        'ตาราง assessments',
-        $assessmentColumns === null ? 'ยังไม่มี — นำเข้า db/schema.sql ก่อน' : ''
-    );
+
+    foreach (['staff_users', 'staff_sessions', 'zones', 'repair_job_events'] as $table) {
+        report(
+            columnsOf($db, $table) === null ? 'fail' : 'pass',
+            'ตาราง ' . $table,
+            columnsOf($db, $table) === null ? 'ยังไม่มี — รัน php db/migrate.php' : ''
+        );
+    }
+
+    $staffColumns = columnsOf($db, 'staff_users');
+    if ($staffColumns !== null) {
+        $hasRole = in_array('role', array_column($staffColumns, 'Field'), true);
+        report($hasRole ? 'pass' : 'fail', 'บทบาทเจ้าหน้าที่', $hasRole ? '' : 'ขาดคอลัมน์ role — รัน php db/migrate.php');
+        if ($hasRole && $staffCount !== null && $staffCount > 0) {
+            $adminCount = (int) $db->query("SELECT COUNT(*) FROM staff_users WHERE active = 1 AND role = 'admin'")->fetchColumn();
+            report(
+                $adminCount > 0 ? 'pass' : 'fail',
+                'ผู้ดูแลระบบที่ใช้งานอยู่',
+                $adminCount > 0 ? $adminCount . ' บัญชี' : 'ต้องมีอย่างน้อย 1 บัญชี — ตั้ง role=admin ให้บัญชีที่ใช้งาน'
+            );
+        }
+    }
+
+    $zoneColumns = columnsOf($db, 'zones');
+    if ($zoneColumns !== null) {
+        $zoneCount = (int) $db->query('SELECT COUNT(*) FROM zones WHERE active = 1')->fetchColumn();
+        report($zoneCount > 0 ? 'pass' : 'warn', 'อาคาร/พื้นที่ใช้งาน', $zoneCount . ' รายการ');
+    }
 }
 
 // --------------------------------------------------------------------- uploads

@@ -302,6 +302,70 @@ a:hover { color: var(--green-deep-hover); }
 
 .page-view.active { display: block; animation: fadeIn 0.2s ease-in-out; }
 
+/* ---------- staff session, notifications, filters ---------- */
+.site-head .head-inner { position: relative; }
+.staff-bell {
+  position: relative; min-width: 44px; min-height: 44px; padding: 6px 10px;
+  border: 1px solid var(--line); border-radius: 999px; background: var(--card);
+  font-size: 18px; cursor: pointer;
+}
+.staff-bell:hover { border-color: var(--green-deep); }
+.staff-bell__count {
+  position: absolute; inset-block-start: -2px; inset-inline-end: -2px;
+  min-width: 18px; height: 18px; padding-inline: 4px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 999px; background: var(--danger); color: #fff;
+  font-size: 11px; font-weight: 600; line-height: 1;
+}
+.notif-panel {
+  position: absolute; z-index: 30; inset-inline-end: var(--space-3);
+  inset-block-start: calc(100% - 2px); width: min(92vw, 380px);
+  padding: var(--space-2); border: 1px solid var(--line); border-radius: var(--radius-sm);
+  background: var(--card); box-shadow: 0 16px 40px rgb(0 0 0 / 0.14);
+}
+.notif-panel__head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
+.notif-panel__head a { font-size: 13px; text-decoration: none; }
+.notif-panel ul { list-style: none; margin: var(--space-1) 0 0; padding: 0; display: grid; gap: 2px; }
+.notif-panel li { padding: 8px 0; border-top: 1px solid var(--line); display: grid; gap: 2px; font-size: 14px; }
+.notif-panel li a { text-decoration: none; color: var(--ink); }
+.notif-panel li span { font-size: 12px; color: var(--ink-soft); }
+.notif-panel li.is-overdue span { color: var(--danger); font-weight: 500; }
+.notif-panel__muted { margin: var(--space-1) 0 0; font-size: 13px; color: var(--ink-soft); }
+
+.filter-bar { margin-top: var(--space-3); display: grid; gap: var(--space-2); }
+.filter-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1); }
+.filter-row select { max-width: 220px; }
+.search-input { flex: 1 1 260px; }
+.report-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.report-action--danger { color: var(--danger); border-color: #ecc8c4; }
+.report-action--danger:hover { background: #fdf3f2; border-color: var(--danger); }
+.report-status[data-status="active"] { background: #fff4e0; color: #8a5b00; }
+.report-status[data-status="danger"] { background: #fdf3f2; color: var(--danger); }
+.report-status[data-status="accepted"] { background: var(--sea-wash); color: var(--sea-deep); }
+.pager {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+  gap: var(--space-2); margin-top: var(--space-3); font-size: 14px; color: var(--ink-soft);
+}
+
+.field-row { display: grid; gap: var(--space-2); }
+.contact-fieldset { border-top: 1px solid var(--line); padding-top: var(--space-3); }
+.contact-fieldset legend { font-size: 18px; font-weight: 500; padding: 0; margin-bottom: var(--space-1); }
+.check-row { display: flex; align-items: center; gap: 8px; margin-bottom: var(--space-3); font-size: 15px; }
+.check-row input { inline-size: auto; }
+.form-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-1); }
+.table-wrap { overflow-x: auto; }
+.table-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.role-badge { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+.role-badge--on { background: var(--green-wash); color: var(--green-deep); }
+.role-badge--off { background: #f7e9e7; color: var(--danger); }
+.timeline { list-style: none; padding: 0; margin: 0; display: grid; gap: var(--space-2); }
+.timeline li { border-left: 3px solid var(--line); padding-left: var(--space-2); }
+.timeline li p { margin: 4px 0 0; font-size: 14px; color: var(--ink-soft); }
+
+@media (min-width: 768px) {
+  .field-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(4px); }
   to { opacity: 1; transform: translateY(0); }

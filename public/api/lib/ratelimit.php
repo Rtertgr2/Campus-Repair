@@ -5,8 +5,7 @@ declare(strict_types=1);
  *
  * State lives in api/storage/ratelimit/<action>-<sha256(ip)>.json and is kept
  * separate from the staff PIN lock (this file never touches PIN verification).
- * Request from a new action gets its own counter, so createIssue and
- * submitAssessment cannot lock each other out.
+ * Request from a new action gets its own counter.
  */
 
 // Counters live next to the API; set RATE_LIMIT_DIR to keep writable data elsewhere.
@@ -15,7 +14,7 @@ define('RATE_LIMIT_DIR', rtrim(getenv('RATE_LIMIT_DIR') ?: __DIR__ . '/../storag
 /** action => [max requests per window, window in seconds] */
 const RATE_LIMITS = [
     'createIssue' => [10, 60],
-    'submitAssessment' => [10, 60],
+    'staffLogin' => [10, 60],
 ];
 
 /**

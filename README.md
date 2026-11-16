@@ -1,222 +1,287 @@
-# Campus Repair — PHP + MySQL / phpMyAdmin
+# Campus Repair — React + PHP + MySQL
 
-ปรับจาก Archive.zip ให้ React เรียก PHP API และบันทึก MySQL จริง
-phpMyAdmin เป็นหน้าจัดการ MySQL ไม่ใช่ปลายทาง API ของแอป
-รองรับแจ้งซ่อมพร้อมรูป, รายการงาน, PIN เจ้าหน้าที่, ปิด/เปิดงาน และแบบประเมิน
+ระบบแจ้งซ่อมสถานที่สำหรับสถานศึกษา: React/Vite ฝั่งหน้าเว็บ, PHP API และ MySQL ฝั่งเซิร์ฟเวอร์
 
-## ติดตั้งบน XAMPP (ใช้ไฟล์ build ที่รวมไว้แล้วได้ทันที)
+รองรับ:
+- แจ้งซ่อมพร้อมรูปและข้อมูลติดต่อผู้แจ้ง
+- บัญชีเจ้าหน้าที่แยกรายคน (ชื่อ + PIN) พร้อมบทบาท `admin` / `technician` / `viewer`, session และการล็อกบัญชีเมื่อลองผิดหลายครั้ง
+- สถานะงานหลายขั้น, การมอบหมายผู้รับผิดชอบ และประวัติการเปลี่ยนแปลง (audit log)
+- ค้นหา/กรอง/แบ่งหน้าฝั่งเซิร์ฟเวอร์ และส่งออก CSV
+- แก้ไข/ลบรายการสำหรับเจ้าหน้าที่
+- จัดการอาคาร/พื้นที่ผ่านหน้าเว็บ
+- แจ้งเตือนในแอปเมื่องานใกล้ครบกำหนด/เลยกำหนด/ยังไม่มอบหมาย (ไม่มีการแจ้งเตือนผ่าน LINE)
+- เก็บรูปเป็นไฟล์ + thumbnail, rate limit, honeypot และการจำกัดขนาดฟิลด์
+
+## โครงสร้างหลัก
+
+| Path | หน้าที่ |
+|---|---|
+| `src/pages/home` | หน้าแรก + สรุปภาพรวม |
+| `src/pages/audit-page` | ฟอร์มแจ้งซ่อม |
+| `src/pages/tracker-page` | รายการงาน, ค้นหา, มอบหมาย, อัปเดตสถานะ, ประวัติ, export |
+| `src/pages/zones-page` | จัดการอาคาร/พื้นที่ (เฉพาะผู้ดูแลระบบ) |
+| `src/pages/staff-page` | สร้าง/แก้บทบาท/รีเซ็ต PIN/ปิดใช้งานบัญชี (เฉพาะผู้ดูแลระบบ) |
+| `src/lib/api.ts` | API client + โหมดสาธิต |
+| `public/api/index.php` | PHP API |
+| `public/api/photos.php` | เก็บรูป + thumbnail |
+| `db/schema.sql` | สคีมาสำหรับฐานข้อมูลใหม่ |
+| `db/migrate.php` | migrate ฐานข้อมูลใหม่/เดิม |
+| `db/create-staff.php` | สร้าง/รีเซ็ตบัญชีเจ้าหน้าที่ |
+| `db/deploy-check.php` | ตรวจความพร้อมก่อน deploy |
+| `db/prune-uploads.php` | ลบรูปที่ไม่มีเจ้าของ |
+| `db/backup.sh` | สำรองฐานข้อมูล + uploads |
+| `tests/api-smoke.mjs` | smoke test ของ API |
+
+## ติดตั้งบน XAMPP
 
 1. เปิด Apache และ MySQL ใน XAMPP Control Panel
-2. เข้า http://localhost/phpmyadmin สร้างฐานข้อมูล `campus_repair`
-   เลือก collation `utf8mb4_unicode_ci`
-3. คลิกฐานข้อมูลนี้ > Import > เลือก `db/schema.sql` > Go
-   จะได้ตาราง `repair_jobs` และ `assessments` (ไม่มีข้อมูลตัวอย่าง)
-4. คัดลอก **เนื้อหาทั้งหมดภายใน `dist/`** ไป `C:\xampp\htdocs\campus-repair\`
-   โครงสร้างต้องเป็น `campus-repair/index.html`, `campus-repair/assets/`, `campus-repair/api/`
-   อย่าอัปโหลดทั้ง source project ไปไว้บน public web root
+2. เข้า `http://localhost/phpmyadmin` สร้างฐานข้อมูล `campus_repair`
+   ด้วย collation `utf8mb4_unicode_ci`
+3. รัน migration จากโฟลเดอร์โปรเจกต์:
+   ```bash
+   php db/migrate.php
+   ```
+   หรือ Import `db/schema.sql` ผ่าน phpMyAdmin สำหรับฐานข้อมูลใหม่
+   (แนะนำ `db/migrate.php` เพราะรองรับทั้งฐานข้อมูลใหม่และฐานข้อมูลเดิม)
+4. คัดลอก **เนื้อหาทั้งหมดใน `dist/`** ไป `C:\xampp\htdocs\campus-repair\`
+   โครงสร้างต้องมี `campus-repair/index.html`, `assets/`, `api/`, `uploads/`
 5. ใน `htdocs/campus-repair/api/` คัดลอก `config.local.example.php` เป็น `config.local.php`
-   แก้ให้ตรงกับ MySQL ของคุณ เช่น:
+   แล้วแก้ค่าให้ตรงกับ MySQL:
+   ```php
+   <?php
+   return [
+       'host' => '127.0.0.1',
+       'port' => '3306',
+       'database' => 'campus_repair',
+       'username' => 'root',
+       'password' => '',
+       'staff_name' => 'เจ้าหน้าที่',
+       'staff_pin' => '1234', // เปลี่ยนก่อนใช้งานจริง
+   ];
+   ```
+6. เปิด `http://localhost/campus-repair/` แล้วทดลองแจ้งซ่อม
+7. กด “โหมดเจ้าหน้าที่” ใช้ชื่อ `เจ้าหน้าที่` และ PIN `1234`
+   (บัญชีเริ่มต้นจะถูกสร้างให้อัตโนมัติเมื่อยังไม่มีบัญชีเจ้าหน้าที่)
+8. สร้างบัญชีเจ้าหน้าที่คนอื่น (หรือใช้หน้า “บัญชีเจ้าหน้าที่” หลังล็อกอินเป็นแอดมิน):
+   ```bash
+   php db/create-staff.php --name="สมชาย" --pin=5678 --role=technician
+   php db/create-staff.php --name="ผู้ดูแล" --pin=5679 --role=admin
+   php db/create-staff.php --list
+   ```
 
-```php
-<?php
-return [
-    'host' => '127.0.0.1',
-    'port' => '3306',
-    'database' => 'campus_repair',
-    'username' => 'root',
-    'password' => '',
-    'staff_pin' => 'เปลี่ยนเป็นตัวเลขส่วนตัวอย่างน้อย6หลัก',
-];
-```
+เว็บไซต์ใช้ `HashRouter` เช่น `/#/tracker` จึงทำงานในโฟลเดอร์ย่อยของ XAMPP ได้โดยไม่ต้องตั้ง rewrite
+วันที่ในฐานข้อมูลเป็น ค.ศ.; API ส่งวันแบบ `dd/mm/yyyy` และกำหนดครบกำหนด +30 วันตามเวลาไทย
 
-รหัสว่างของ root เป็นค่าเริ่มต้นใน XAMPP บางเครื่องเท่านั้น หากตั้งรหัสไว้ให้ใส่รหัสจริง
-บัญชี MySQL อาจต่างจากบัญชีล็อกอิน phpMyAdmin
-PIN ต้องเป็นตัวเลข 6 หลักขึ้นไป ไม่มี PIN เริ่มต้นสำหรับฐานข้อมูลจริง
+## การตั้งค่า environment
 
-6. เปิด **http://localhost/campus-repair/** แล้วทดลองแจ้งซ่อม
-   รีเฟรชหน้า ข้อมูลต้องยังอยู่ และตรวจรายการใน phpMyAdmin ได้
-7. กดโหมดเจ้าหน้าที่ ใส่ PIN ที่ตั้งไว้ ทดลองปิดงาน แนบรูปหลังซ่อม และเปิดงานกลับ
+ตั้งค่าผ่าน environment ของ web server หรือ `public/api/config.local.php`
 
-เว็บไซต์ใช้ HashRouter เช่น `/#/tracker` เพื่อทำงานในโฟลเดอร์ย่อยของ XAMPP โดยไม่ต้องตั้ง rewrite
-ฐานข้อมูลใช้วันที่ ค.ศ.; API ส่งวันงานแบบ dd/mm/yyyy และกำหนดส่ง +30 วันตามเวลาไทย
-เก็บภาพ JPEG/PNG/WebP เป็น data URL ในฐานข้อมูล จำกัดประมาณ 3 MB ต่อ data URL
+| ตัวแปร | ค่าเริ่มต้น | ความหมาย |
+|---|---|---|
+| `DB_HOST` | `127.0.0.1` | MySQL host |
+| `DB_PORT` | `3306` | MySQL port |
+| `DB_NAME` | `campus_repair` | ชื่อฐานข้อมูล |
+| `DB_USER` | `root` | ผู้ใช้ MySQL |
+| `DB_PASSWORD` | ว่าง | รหัสผ่าน MySQL |
+| `STAFF_PIN` | ว่าง | PIN ของบัญชีเริ่มต้น (อย่างน้อย 4 หลัก) |
+| `STAFF_NAME` | `เจ้าหน้าที่` | ชื่อบัญชีเริ่มต้น |
+| `UPLOADS_DIR` | `public/uploads` | โฟลเดอร์เก็บรูป |
+| `UPLOAD_DAILY_BYTES` | `52428800` | โควตารูปต่อ IP ต่อวัน (0 = ปิด) |
+| `TRUSTED_PROXIES` | ว่าง | IP ของ proxy ที่เชื่อถือได้ คั่นด้วย comma |
+| `RATE_LIMIT_DIR` | `public/api/storage/ratelimit` | ที่เก็บตัวนับ rate limit |
 
-## พัฒนา / build ใหม่
+อย่าใส่รหัสฐานข้อมูลหรือ PIN ในตัวแปร `VITE_*` เพราะจะถูกฝังใน JavaScript ฝั่ง browser
+ค่าเริ่มต้นของ frontend คือ `./api/index.php`; ถ้าต้องการชี้ไป origin อื่นให้ตั้ง `VITE_API_URL`
+และถ้าต้องการสาธิตชั่วคราวให้ตั้ง `VITE_API_URL=demo`
 
-ต้องมี Node.js 20.19+ และ PHP 7.4+ (แนะนำ PHP 8.2+) พร้อมส่วนขยาย `pdo_mysql`
+## พัฒนา / build
+
+ต้องมี Node.js 20.19+ และ PHP 8.0+ (แนะนำ 8.2/8.3) พร้อม `pdo_mysql`, `gd`, `mbstring`
 
 ```bash
 npm ci
-# Terminal 1 (เพิ่ม path ของ php.exe ใน PATH หรือใช้ C:\xampp\php\php.exe แทน php)
+cp public/api/config.local.example.php public/api/config.local.php
+php db/migrate.php
+
+# Terminal 1
 npm run dev:api
 # Terminal 2
 npm run dev
 ```
 
-เปิด URL ที่ Vite แสดง (ปกติ http://localhost:5173)
-Vite จะ proxy `/api` ไป PHP ที่ 127.0.0.1:8080
-ก่อนรัน API ให้คัดลอก `public/api/config.local.example.php` เป็น
-`public/api/config.local.php` แล้วตั้งค่าฐานข้อมูลและ PIN
-ต้องนำเข้า SQL ใน MySQL ก่อนเช่นเดียวกับการติดตั้งข้างต้น
+เปิด URL ที่ Vite แสดง (ปกติ `http://localhost:5173`) แล้วทดสอบ
+ถ้าต้องการ build:
 
 ```bash
 npm run typecheck
+npm test
 npm run build
 ```
 
-Vite คัดลอก `public/api/` เข้า `dist/api/` ทุกครั้งที่ build
-ถ้าแก้ config เฉพาะใน dist ให้สำรองก่อน build ใหม่
-ค่าเริ่มต้นของ frontend คือ `./api/index.php` ไม่ต้องสร้าง `.env`
-หากต้องการสาธิตชั่วคราวตั้ง `VITE_API_URL=demo` ใน `.env.local` แล้วเริ่ม Vite/build ใหม่
-โหมดนี้ไม่บันทึกข้อมูลถาวร ถ้า API จริงล้มเหลวจะขึ้นข้อผิดพลาด ไม่สลับไป mock อัตโนมัติ
+`npm run build` จะคัดลอก `public/api/` และ `public/uploads/` ไป `dist/`
+อย่าลบ `uploads/` บนเซิร์ฟเวอร์จริงตอน deploy
+
+## บัญชีเจ้าหน้าที่และความปลอดภัย
+
+- บัญชีเจ้าหน้าที่เก็บเป็น `name` + `pin_hash` (password hash) + `role` ในตาราง `staff_users`
+- ล็อกอินสำเร็จจะได้ token อายุ 12 ชั่วโมง เก็บใน `sessionStorage` ฝั่ง browser
+- ลอง PIN ผิด 5 ครั้งจะล็อกบัญชี 15 นาที
+- `loginStaff` ถูกจำกัด 10 ครั้ง/นาทีต่อ IP
+- รีเซ็ต PIN หรือปิดใช้งานบัญชีจะยกเลิก session เดิมของบัญชีนั้น
+- ทุกการเปลี่ยนสถานะ/แก้ไข/ลบจะถูกบันทึกใน `repair_job_events`
+- รายการสาธารณะไม่แสดงเบอร์โทร/อีเมลผู้แจ้ง; เจ้าหน้าที่ที่ล็อกอินจะเห็นข้อมูลติดต่อ
+- ต้องให้สิทธิ์เขียนโฟลเดอร์ `uploads/` และ `public/api/storage/`
+
+### บทบาทและสิทธิ์
+
+| บทบาท | ดูรายการ/ประวัติ | อัปเดตสถานะ/แก้ไขงาน | ลบงาน | จัดการอาคาร | จัดการบัญชี |
+|---|---|---|---|---|---|
+| `admin` | ได้ | ได้ | ได้ | ได้ | ได้ |
+| `technician` | ได้ | ได้ | ไม่ได้ | ไม่ได้ | ไม่ได้ |
+| `viewer` | ได้ | ไม่ได้ | ไม่ได้ | ไม่ได้ | ไม่ได้ |
+
+ผู้ดูแลระบบจัดการบัญชีได้ที่เมนู **บัญชีเจ้าหน้าที่** (`/#/staff`):
+สร้างบัญชี เปลี่ยนบทบาท รีเซ็ต PIN และเปิด/ปิดใช้งาน
+ระบบป้องกันการปิดใช้งานบัญชีตัวเอง และป้องกันไม่ให้เหลือผู้ดูแลระบบที่ใช้งานอยู่เป็นศูนย์
+
+บัญชีเริ่มต้นที่สร้างจาก `STAFF_PIN` จะเป็น `admin` ส่วนบัญชีใหม่ที่สร้างผ่านหน้าเว็บ/CLI
+ค่าเริ่มต้นเป็น `technician` (กำหนด `--role` หรือเลือกในหน้าเว็บได้)
+
+## สถานะงาน
+
+ลำดับสถานะที่ใช้:
+
+1. `รอแก้ไข`
+2. `รับเรื่องแล้ว`
+3. `กำลังซ่อม`
+4. `รออะไหล่`
+5. `ปิดงานแล้ว`
+6. `ซ่อมไม่ได้`
+7. `ยกเลิก`
+
+สถานะ `ปิดงานแล้ว`, `ซ่อมไม่ได้`, `ยกเลิก` ถือเป็นสถานะสิ้นสุดและจะบันทึก `closed_date`
+การเปลี่ยนกลับเป็นสถานะอื่นจะล้าง `closed_date`
+
+## อาคาร/พื้นที่
+
+- ข้อมูลเริ่มต้น 5 อาคารอยู่ในตาราง `zones`
+- ผู้ดูแลระบบจัดการเพิ่ม/แก้ไข/ปิดใช้งานได้ที่เมนู “จัดการพื้นที่”
+- ฟอร์มแจ้งซ่อมและหน้าแรกดึงรายการจาก API
+- การปิดใช้งานจะไม่ลบงานเดิม
 
 ## รูปภาพ (uploads)
 
-รูปก่อน/หลังซ่อมถูกเก็บเป็นไฟล์ใต้ `uploads/<ปี>/<เดือน>/` ไม่เก็บ base64 ในตาราง
-ฐานข้อมูลเก็บเฉพาะ path (`before_photo_path`, `after_photo_path`) และมี thumbnail
-กว้าง 480px ชื่อ `<ไฟล์>-thumb.jpg` อยู่ข้างไฟล์จริง (ถ้าไม่ได้เปิดส่วนขยาย GD
-ระบบจะใช้ไฟล์เต็มแทน thumbnail ให้เอง)
+รูปก่อน/หลังซ่อมเก็บเป็นไฟล์ใต้ `uploads/<ปี>/<เดือน>/`
+ฐานข้อมูลเก็บเฉพาะ path (`before_photo_path`, `after_photo_path`)
+และมี thumbnail กว้าง 480px ชื่อ `<ไฟล์>-thumb.jpg`
 
 - โฟลเดอร์ `uploads/` ต้องให้สิทธิ์เขียนกับผู้ใช้ของ web server
-- สำรองข้อมูลทั้งฐานข้อมูลและโฟลเดอร์ `uploads/` คู่กันเสมอ
-- ตอน deploy ใหม่ ให้คัดลอกไฟล์ใน `dist/` ทับ และ **อย่าลบ** `uploads/` บนเซิร์ฟเวอร์
-- ถ้าเก็บ uploads ไว้นอกโฟลเดอร์เว็บ ให้ตั้ง `UPLOADS_DIR` (absolute path) ให้ PHP
+- สำรองทั้งฐานข้อมูลและ `uploads/` คู่กันเสมอ
+- ถ้าเก็บ uploads ไว้นอกรากเว็บ ให้ตั้ง `UPLOADS_DIR` เป็น absolute path
+- ถ้ายังมีฐานข้อมูลเดิมที่เก็บ base64 ในคอลัมน์ `*_photo_data_url` ให้ใช้ `db/migrate-photos.php`:
+  ```bash
+  php db/migrate-photos.php --dry-run --uploads=/opt/lampp/htdocs/campus-repair/uploads
+  php db/migrate-photos.php --uploads=/opt/lampp/htdocs/campus-repair/uploads
+  php db/migrate-photos.php --uploads=... --drop-blobs
+  ```
+  ควรสำรองฐานข้อมูลก่อนใช้ `--drop-blobs`
 
-ถ้ายังไม่ได้ย้ายข้อมูลแล้ว deploy API ใหม่ API จะตอบ **503** พร้อมบอกให้รันสคริปต์นี้
-ก่อน (ทุกคำสั่งที่แตะ `repair_jobs`) แทนที่จะพังเป็น error 500 กว้าง ๆ
-
-ถ้าฐานข้อมูลเดิมยังเก็บ base64 ในคอลัมน์ `*_photo_data_url` ให้ย้ายข้อมูลครั้งเดียว
-โดยต้องระบุโฟลเดอร์ uploads ของ **เว็บที่ deploy จริง** (โฟลเดอร์ที่มี `index.html`
-และ `api/index.php` อยู่ข้าง ๆ เพราะ DB จะเก็บ path แบบ `uploads/<ปี>/<เดือน>/...`):
-
-```bash
-php db/migrate-photos.php --dry-run --uploads=/opt/lampp/htdocs/campus-repair/uploads
-php db/migrate-photos.php --uploads=/opt/lampp/htdocs/campus-repair/uploads
-php db/migrate-photos.php --uploads=... --drop-blobs   # ลบคอลัมน์เดิม (สำรองก่อน)
-```
-
-สคริปต์ตรวจโฟลเดอร์ปลายทางก่อนเขียน: ต้องชื่อ `uploads`, เขียนไฟล์ได้,
-และต้องอยู่ในรากเว็บที่มี `index.html` + `api/index.php` ถ้ายืนยันไม่ได้จะหยุด
-(exit 2) เว้นแต่ใส่ `--force` จากนั้นจะรายงานจำนวนรูปที่ย้ายและตรวจว่าไฟล์
-อยู่จริงในโฟลเดอร์ปลายทาง (ถ้าหายจะ exit 1)
-
-อย่าชี้ไปที่ `dist/uploads` เพราะ `npm run build` ล้าง `dist` ทั้งโฟลเดอร์
-สคริปต์รันซ้ำได้ (ข้ามแถวที่ย้ายแล้ว) และเพิ่มคอลัมน์ path ให้เองถ้ายังไม่มี
-
-## ตรวจความพร้อมและเก็บกวาดไฟล์
-
-สองสคริปต์นี้รันจาก **โฟลเดอร์โปรเจกต์** (ไม่ใช่จาก `dist/` เพราะ `dist` ไม่มี `db/`)
-และอ่านค่าเชื่อมต่อจาก `public/api/config.php` — ตั้ง `DB_HOST`, `DB_NAME`, `DB_USER`,
-`DB_PASSWORD`, `STAFF_PIN` (หรือใช้ `public/api/config.local.php`) ให้ชี้ไปที่เว็บจริง
-ก่อนรัน ถ้า uploads อยู่ที่อื่นให้ส่ง `--uploads=<absolute path>`; เรียกผ่านเบราว์เซอร์ไม่ได้ (ตอบ 404)
-
-### `db/deploy-check.php` — ตรวจก่อน/หลัง deploy
+## Migration / backup / deploy check
 
 ```bash
-php db/deploy-check.php
-php db/deploy-check.php --uploads=/opt/lampp/htdocs/campus-repair/uploads
-npm run deploy:check     # ทางลัด (ต้องมี PHP ในเครื่องที่รัน)
+php db/migrate.php                 # อัปเดตสคีมา (รันซ้ำได้)
+php db/create-staff.php --list     # ดูบัญชีเจ้าหน้าที่
+php db/deploy-check.php            # ตรวจความพร้อม
+php db/backup.sh ./backups         # สำรอง DB + uploads
 ```
 
-ตรวจ: PHP ≥ 8.0, `pdo_mysql`, `gd`, `mbstring`, ค่าคอนเนกชัน, `config.local.php`,
-`STAFF_PIN`, การต่อ MySQL, ตาราง `repair_jobs` + คอลัมน์ `before_photo_path`/
-`after_photo_path`, คอลัมน์ base64 เดิมเป็น NULL ได้, ตาราง `assessments`,
-เขียนไฟล์ใน uploads ได้, uploads อยู่ใต้รากเว็บ, โฟลเดอร์ตัวนับ rate limit เขียนได้,
-พื้นที่ดิสก์เหลือ ≥ 512 MB
+`db/migrate.php` สร้างตารางที่ขาด เพิ่มคอลัมน์/Index และอัปเดต ENUM ของสถานะ
+พร้อมบันทึกเวอร์ชันใน `schema_migrations`
 
-- ตัวเลือก: `--uploads=<dir>` เท่านั้น นอกนั้นอ่านจาก config
-- ผลลัพธ์: บรรทัดละ `PASS` / `WARN` / `FAIL` พร้อมวิธีแก้ และสรุปท้าย `ผ่าน X, เตือน Y, ต้องแก้ Z`
-- **exit 0** = ไม่มี FAIL (WARN ไม่ทำให้ล้ม เช่น ไม่มี GD ก็ยังใช้รูปเต็มแทน thumbnail ได้)
-- **exit 1** = มีอย่างน้อยหนึ่ง FAIL ต้องแก้ก่อนเปิดใช้
+`db/deploy-check.php` ตรวจ PHP/extensions, config, MySQL, ตาราง/คอลัมน์,
+บัญชีเจ้าหน้าที่, สถานะ, zones, uploads, rate-limit directory และพื้นที่ดิสก์
+ผลลัพธ์เป็น `PASS` / `WARN` / `FAIL`; exit 1 เมื่อมี FAIL
 
-### `db/prune-uploads.php` — ลบไฟล์รูปที่ไม่มีเจ้าของ
+`db/prune-uploads.php` ลบรูปที่ไม่มี path ไหนใน `repair_jobs` ชี้มา:
 
 ```bash
 php db/prune-uploads.php --dry-run
-php db/prune-uploads.php --uploads=/opt/lampp/htdocs/campus-repair/uploads
-php db/prune-uploads.php --min-age=600 --limit=100
+php db/prune-uploads.php --uploads=/opt/lampp/htdocs/campus-repair/uploads --min-age=86400
 ```
 
-ไฟล์กำพร้า = ไม่มี path ไหนใน `repair_jobs` ชี้มา (thumbnail ของรูปที่ถูกอ้างถึงนับว่ามีเจ้าของ)
-ข้าม dotfile อย่าง `.htaccess` และข้ามไฟล์ที่เพิ่งเขียนภายใน `--min-age` เพราะอาจเป็นคำขอที่ยังทำงานอยู่
-
-| ตัวเลือก | ความหมาย |
-|---|---|
-| `--dry-run` | พิมพ์รายการที่จะลบ (สูงสุด 20 บรรทัดแรก) ไม่ลบจริง — ควรใช้ก่อนทุกครั้ง |
-| `--uploads=<dir>` | โฟลเดอร์ปลายทาง (ค่าเริ่มต้น `UPLOADS_DIR` หรือ `public/uploads`) |
-| `--min-age=<วินาที>` | ข้ามไฟล์ที่ใหม่กว่านี้ (ค่าเริ่มต้น 3600, `0` = ไม่ข้าม) |
-| `--limit=<n>` | ลบไม่เกิน n ไฟล์ต่อรอบ |
-
-- **exit 0** = ทำงานจบ (ไม่พบไฟล์ หรือลบสำเร็จทั้งหมด)
-- **exit 1** = หาโฟลเดอร์ไม่เจอ / อ่านฐานข้อมูลไม่ได้ / มีไฟล์ที่ลบไม่สำเร็จ (พิมพ์ path ทาง stderr)
-
-ตั้งรันเป็นรอบ (cron) บนเครื่องที่มองเห็นทั้งฐานข้อมูลและโฟลเดอร์ uploads:
+ตัวอย่าง cron:
 
 ```bash
-# ตรวจความพร้อมทุกวัน 03:10 และเก็บกวาดไฟล์กำพร้าทุกสัปดาห์ (อาทิตย์ 03:40)
 10 3 * * *  cd /home/deploy/campus-repair && php db/deploy-check.php --uploads=/opt/lampp/htdocs/campus-repair/uploads >> /var/log/campus-api.log 2>&1
 40 3 * * 0  cd /home/deploy/campus-repair && php db/prune-uploads.php --uploads=/opt/lampp/htdocs/campus-repair/uploads --min-age=86400 >> /var/log/campus-prune.log 2>&1
 ```
 
-cron ไม่ได้รับ `DB_*`/`STAFF_PIN` จาก shell โดยอัตโนมัติ — ถ้าไม่ได้ export ไว้ ใน crontab
-ให้ใช้ `public/api/config.local.php` แทน และรัน `--dry-run` ด้วยมือหนึ่งครั้งก่อนเปิด cron
+cron ไม่ได้รับ `DB_*`/`STAFF_PIN` จาก shell อัตโนมัติ ให้ใช้ `public/api/config.local.php`
 
 ## ความปลอดภัยของฟอร์มสาธารณะ
 
-- **Rate limit ต่อ IP**: `createIssue` และ `submitAssessment` จำกัด 10 ครั้ง/นาที
-  เก็บสถานะเป็นไฟล์ที่ `public/api/storage/ratelimit/` (แยก bucket ตาม action+IP,
-  เขียนแบบ `flock`) ไม่เกี่ยวกับ PIN ของเจ้าหน้าที่ และตอบ `429` พร้อม `Retry-After: 60`
-  ถ้าโฟลเดอร์เขียนไม่ได้ ระบบจะ log แล้วปล่อยผ่าน เพื่อไม่ให้ฟอร์มล่ม
-- **อยู่หลัง proxy/CDN**: ตั้ง `TRUSTED_PROXIES` เป็น IP ของ proxy (คั่นด้วย comma)
-  เช่น `TRUSTED_PROXIES=10.0.0.5` — API จะอ่าน `X-Forwarded-For` เฉพาะเมื่อคำขอมาจาก
-  IP ที่ระบุ และใช้ IP ขวาสุดที่ไม่ใช่ proxy เป็นคีย์ของเพดาน ถ้าไม่ตั้ง (ค่าเริ่มต้น)
-  header นี้จะถูกเมินทั้งหมด เพราะใครก็ส่งมาได้
-- **เพดานรูปต่อ IP ต่อวัน**: `UPLOAD_DAILY_BYTES` (ค่าเริ่มต้น 50 MB, `0` = ปิด)
-  นับจากขนาดรูปที่แนบมากับ `createIssue` เท่านั้น — เกินแล้วได้ `429` พร้อม
-  `Retry-After` ถึงเที่ยงคืน (การปิดงานของเจ้าหน้าที่ไม่ถูกนับ)
-- **Honeypot**: ฟิลด์ซ่อน `website` (absolute + off-screen) ในหน้าแจ้งซ่อม
-  ถ้ามีค่า ฝั่งเซิร์ฟเวอร์ปฏิเสธด้วย `400` ข้อความกลาง ๆ "ไม่สามารถดำเนินการได้"
-  โดยไม่บอกสาเหตุ (ตรวจทั้ง top-level และใน `issue`/`assessment`)
-- **จำกัดความยาวฟิลด์** (นับเป็นตัวอักษร): 2,000 สำหรับ `locationDetail`, `suggestion`,
-  `staffNote`; 191 สำหรับ `zone`, `category`, `riskLevel`, `studentName`;
-  64 สำหรับ `groupId`, `studentId`, `level` — ค่าที่เกินขอบเขตเข้มจะถูกปฏิเสธก่อน
-- ต้องให้สิทธิ์เขียนโฟลเดอร์ `public/api/storage/` กับผู้ใช้ของ web server
+- **Rate limit ต่อ IP**: `createIssue` 10 ครั้ง/นาที (ไฟล์ใน `public/api/storage/ratelimit/`)
+- **Login rate limit**: `loginStaff` 10 ครั้ง/นาที และล็อกบัญชีเมื่อลอง PIN ผิด 5 ครั้ง
+- **สิทธิ์ตามบทบาท**: ตรวจที่ API ทุกครั้ง ไม่พึ่งการซ่อนปุ่มใน UI
+- **Honeypot**: ฟิลด์ซ่อน `website`; ถ้ามีค่าจะตอบ `400` แบบไม่บอกสาเหตุ
+- **เพดานรูปต่อ IP ต่อวัน**: `UPLOAD_DAILY_BYTES` (ค่าเริ่มต้น 50 MB)
+- **จำกัดความยาวฟิลด์**: 2,000 ตัวอักษรสำหรับข้อความยาว, 191 สำหรับชื่อ/โซน/หมวด, 64 สำหรับรหัส
+- **ตรวจ Origin**: API รับเฉพาะคำขอจาก origin เดียวกัน
+- **X-Forwarded-For**: อ่านเฉพาะเมื่อคำขอมาจาก IP ใน `TRUSTED_PROXIES`
 
-รัน smoke test (ต้องมี API รันอยู่และ DB ที่ migrate แล้ว):
+## การแจ้งเตือน
+
+แจ้งเตือนเป็นแบบ **in-app** ผ่านกระดิ่งใน header สำหรับเจ้าหน้าที่:
+- งานที่ยังไม่ปิดและครบกำหนดภายใน 3 วัน
+- งานที่เลยกำหนด
+- จำนวนงานที่ยังไม่มอบหมาย
+
+ระบบนี้ **ไม่ส่งแจ้งเตือนผ่าน LINE** และไม่ต้องใช้ token ภายนอก
+หากต้องการอีเมล/SMS/LINE ภายหลังสามารถเพิ่มภายหลังได้โดยไม่กระทบข้อมูลงาน
+
+## ทดสอบ
 
 ```bash
-rm -f public/api/storage/ratelimit/*.json   # ให้ตัวนับเริ่มใหม่
-API_BASE=http://127.0.0.1:8080/api/index.php STAFF_PIN=123456 npm run test:api
+npm run typecheck
+npm test                 # unit tests ของ API client
+npm run build
+
+# ต้องมี API + MySQL รันอยู่
+rm -f public/api/storage/ratelimit/*.json
+API_BASE=http://127.0.0.1:8099/api/index.php \
+STAFF_PIN=1234 \
+UPLOADS_DIR="$PWD/public/uploads" \
+node tests/api-smoke.mjs
 ```
+
+CI อยู่ที่ `.github/workflows/ci.yml`:
+- frontend: typecheck, unit test, build
+- api: PHP lint, migrate, deploy-check และ smoke test กับ MariaDB 10.11
 
 ## โฮสติ้ง
 
-อัปโหลดเนื้อหาของ dist ไปยัง PHP hosting ที่เปิด PDO MySQL และตั้งค่า api/config.local.php
-หรือกำหนด environment ฝั่งเซิร์ฟเวอร์: DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD, STAFF_PIN
-ใช้ HTTPS และบัญชี MySQL เฉพาะแอปที่มีสิทธิ์ SELECT, INSERT, UPDATE ในสองตารางนี้
-อย่าใส่รหัสฐานข้อมูล/PIN ลงในตัวแปร VITE_* เพราะจะถูกฝังใน JavaScript ที่ผู้ใช้เปิดดูได้
-ระบบคงรูปแบบเดิมคือเปิดอ่านรายการและส่งแจ้งซ่อมได้สาธารณะ ส่วนแก้สถานะต้องใช้ PIN
-หากจะเปิดสู่สาธารณะให้เพิ่มการจำกัดความถี่การลอง PIN ที่ web server/reverse proxy
+อัปโหลด `dist/` ไปยัง PHP hosting ที่เปิด PDO MySQL
+ตั้งค่า `api/config.local.php` หรือ environment ฝั่งเซิร์ฟเวอร์
+ใช้ HTTPS และบัญชี MySQL เฉพาะแอปที่มีสิทธิ์ SELECT, INSERT, UPDATE, DELETE
+ในตารางที่เกี่ยวข้อง
 
 ## ตรวจรับและแก้ปัญหา
 
 - แจ้งซ่อมภาษาไทยพร้อมรูป: หลังรีเฟรชต้องยังเห็นข้อมูลและรูปเดิม
-- ใส่ PIN ผิด: ต้องแก้สถานะไม่ได้; PIN ถูก: ปิดงานแล้วต้องได้วันที่ปิด
+- PIN ผิด: ต้องอัปเดตสถานะไม่ได้; PIN ถูก: เปลี่ยนสถานะได้และมีประวัติ
 - เปิดงานกลับ: ล้างวันที่ปิด แต่คงบันทึกและรูปหลังซ่อม
-- API ตอบ 500: ดู Apache/PHP error log, ชื่อฐานข้อมูล, รหัสผ่าน, pdo_mysql และการนำเข้า schema
-- API ตอบ 503 ตอนใช้ PIN: ยังไม่ได้ตั้ง PIN เป็นตัวเลขอย่างน้อย 6 หลัก
+- API ตอบ 500: ดู PHP error log, config, `pdo_mysql` และรัน `php db/migrate.php`
+- API ตอบ 503: ยังไม่มีตาราง/คอลัมน์ หรือยังไม่มีบัญชีเจ้าหน้าที่และ `STAFF_PIN`
 - API ตอบ 405 เมื่อเปิดใน browser: ปกติ API รับ POST เท่านั้น
-- ถ้าเห็นข้อความ PHP เป็นโค้ด: ต้องเปิดผ่าน Apache/PHP ไม่ใช่ดับเบิลคลิกไฟล์ หรือใช้ Vite preview อย่างเดียว
+- ถ้าเห็นข้อความ PHP เป็นโค้ด: ต้องเปิดผ่าน Apache/PHP ไม่ใช่ดับเบิลคลิกไฟล์
 - ใช้ DevTools Network ดู `api/index.php`: ควรตอบ JSON และ `ok: true`
-
-ไฟล์ PostgreSQL เดิมเก็บไว้ใน `db/legacy-postgres/` เพื่ออ้างอิง ไม่ได้ถูกเรียกใช้งาน
-ไฟล์ `apps-script/` เป็น backend เดิม ไม่จำเป็นสำหรับ PHP/MySQL
-ไม่มีการย้ายข้อมูลเดิมจาก Google Sheets/Postgres อัตโนมัติ
 
 ## ผลตรวจในสภาพแวดล้อมจัดทำ
 
 - React production build ผ่าน
 - TypeScript typecheck ผ่าน
-- ตรวจไวยากรณ์ไฟล์ PHP ทั้ง 3 ไฟล์ด้วย php-parser ในโหมด PHP 7.4 ผ่าน
-- ยังไม่ได้รัน PHP API หรือทดสอบ CRUD กับ MySQL จริง (สภาพแวดล้อมไม่มี PHP/MySQL)
-- ยังไม่ได้เชื่อมฐานข้อมูลของผู้ใช้ ต้องตั้งค่าตามขั้นตอนข้างต้นก่อน
+- Unit test ฝั่ง frontend ผ่าน (`npm test`, 10 tests)
+- ตรวจไวยากรณ์ไฟล์ PHP ทั้งหมดด้วย PHP 8.3 ผ่าน
+- ทดสอบ API กับ MariaDB 10.11 จริง: deploy-check ผ่าน 22 ข้อ (เตือน 1), smoke test ผ่าน 60 ข้อ
+- ทดสอบสิทธิ์ admin/technician/viewer, การรีเซ็ต PIN และการปิดใช้งานบัญชีผ่าน API แล้ว
+- ยังไม่ได้เชื่อมฐานข้อมูลของผู้ใช้จริง ต้องตั้งค่าตามขั้นตอนข้างต้นก่อน

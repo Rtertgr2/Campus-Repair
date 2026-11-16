@@ -1,10 +1,12 @@
 import React from "react"
-import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom"
+import { HashRouter as Router, Routes, Route, Navigate } from "react-router-dom"
 
 // Components
 import Home from "./pages/home/Home"
 import AuditPage from "./pages/audit-page/AuditPage"
 import TrackerPage from "./pages/tracker-page/TrackerPage"
+import ZonesPage from "./pages/zones-page/ZonesPage"
+import StaffPage from "./pages/staff-page/StaffPage"
 import Header from "./components/header/Header"
 import { StaffProvider } from "./lib/staff-context"
 
@@ -18,6 +20,8 @@ const App: React.FC = () => (
           <Route path="/" element={<Home />} />
           <Route path="audit" element={<AuditPage />} />
           <Route path="tracker" element={<TrackerPage />} />
+          <Route path="zones" element={<ZonesPage />} />
+          <Route path="staff" element={<StaffPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>

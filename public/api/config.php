@@ -7,6 +7,7 @@ $config = [
     'username' => getenv('DB_USER') ?: 'root',
     'password' => getenv('DB_PASSWORD') === false ? '' : getenv('DB_PASSWORD'),
     'staff_pin' => getenv('STAFF_PIN') ?: '',
+    'staff_name' => getenv('STAFF_NAME') ?: 'เจ้าหน้าที่',
     // Per-IP daily photo budget for the public form, in bytes (0 disables it).
     'upload_daily_bytes' => (int) (getenv('UPLOAD_DAILY_BYTES') ?: 50 * 1024 * 1024),
     // Proxy IPs (comma separated) whose X-Forwarded-For is trusted; empty means the
